@@ -4,7 +4,10 @@ from googleapiclient.discovery import build
 
 mcp = FastMCP("Gmail Server")
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose"
+]
 
 
 def get_gmail_service():
@@ -148,6 +151,45 @@ def get_email(message_id: str):
         "date": header_dict.get("Date", ""),
         "body": body
     }
+
+
+@mcp.tool()
+def create_draft(to: str, subject: str, body: str):
+    """Create a Gmail draft without sending it."""
+
+    service = get_gmail_service()
+
+    if to.lower() == "me":
+        profile = service.users().getProfile(userId="me").execute()
+        to = profile["emailAddress"]
+
+    import base64
+    from email.mime.text import MIMEText
+
+    message = MIMEText(body)
+    message["to"] = to
+    message["subject"] = subject
+
+    encoded_message = base64.urlsafe_b64encode(
+        message.as_bytes()
+    ).decode()
+
+    draft = service.users().drafts().create(
+        userId="me",
+        body={
+            "message": {
+                "raw": encoded_message
+            }
+        }
+    ).execute()
+
+    return {
+        "status": "draft_created",
+        "draft_id": draft["id"],
+        "to": to,
+        "subject": subject
+    }
+
 
 
 if __name__ == "__main__":
