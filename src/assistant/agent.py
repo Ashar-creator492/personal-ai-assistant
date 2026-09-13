@@ -1,3 +1,4 @@
+
 import asyncio
 import os
 
@@ -38,6 +39,31 @@ async def run_agent(question, llm_with_tools, tools):
 
             print(f"Using tool: {tool_call['name']}")
             print(f"Arguments: {tool_call['args']}")
+
+            # Ask for confirmation before sending an email
+            if tool_call["name"] == "send_email":
+
+                args = tool_call["args"]
+
+                print("\nEmail ready to send:")
+                print(f"To: {args['to']}")
+                print(f"Subject: {args['subject']}")
+                print(f"Body: {args['body']}")
+
+                confirmation = input("\nSend this email? (yes/no): ")
+
+                if confirmation.lower() != "yes":
+
+                    print("Email cancelled.")
+
+                    messages.append(
+                        ToolMessage(
+                            content="The user cancelled the email. Do not send it.",
+                            tool_call_id=tool_call["id"],
+                        )
+                    )
+
+                    continue
 
             tool = next(
                 tool for tool in tools
@@ -84,3 +110,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

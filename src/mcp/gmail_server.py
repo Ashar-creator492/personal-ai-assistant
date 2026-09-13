@@ -192,6 +192,41 @@ def create_draft(to: str, subject: str, body: str):
 
 
 
+
+@mcp.tool()
+def send_email(to: str, subject: str, body: str):
+    """Send an email through Gmail."""
+
+    service = get_gmail_service()
+
+    if to.lower() == "me":
+        profile = service.users().getProfile(userId="me").execute()
+        to = profile["emailAddress"]
+
+    import base64
+    from email.mime.text import MIMEText
+
+    message = MIMEText(body)
+    message["to"] = to
+    message["subject"] = subject
+
+    encoded_message = base64.urlsafe_b64encode(
+        message.as_bytes()
+    ).decode()
+
+    sent = service.users().messages().send(
+        userId="me",
+        body={"raw": encoded_message}
+    ).execute()
+
+    return {
+        "status": "email_sent",
+        "message_id": sent["id"],
+        "to": to,
+        "subject": subject
+    }
+
+
 if __name__ == "__main__":
     mcp.settings.port = 8001
     mcp.run(transport="streamable-http")
