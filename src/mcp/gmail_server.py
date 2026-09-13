@@ -1,6 +1,21 @@
 from mcp.server.fastmcp import FastMCP
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from bs4 import BeautifulSoup
+from langchain_groq import ChatGroq
+from dotenv import load_dotenv
+import base64
+import os
+import json
+
+
+load_dotenv()
+
+llm = ChatGroq(
+    model="openai/gpt-oss-20b",
+    temperature=0,
+    api_key=os.getenv("GROQ_API_KEY"),
+)
 
 mcp = FastMCP("Gmail Server")
 
@@ -17,6 +32,78 @@ def get_gmail_service():
     )
 
     return build("gmail", "v1", credentials=credentials)
+
+
+def decode_body(data):
+    """Decode Gmail's URL-safe base64 body data."""
+
+    if not data:
+        return ""
+
+    try:
+        return base64.urlsafe_b64decode(data).decode(
+            "utf-8",
+            errors="ignore"
+        )
+    except Exception:
+        return ""
+
+
+def extract_text_from_payload(payload):
+    """Extract useful text from a Gmail MIME payload."""
+
+    # Direct body
+    if payload.get("body", {}).get("data"):
+        body = decode_body(payload["body"]["data"])
+
+        if payload.get("mimeType") == "text/html":
+            soup = BeautifulSoup(body, "html.parser")
+
+            # Remove things that add lots of useless text
+            for tag in soup(["script", "style", "noscript"]):
+                tag.decompose()
+
+            body = soup.get_text(" ", strip=True)
+
+        return body
+
+    # Multipart email
+    parts = payload.get("parts", [])
+
+    # Prefer plain text
+    for part in parts:
+        if part.get("mimeType") == "text/plain":
+            body = decode_body(
+                part.get("body", {}).get("data")
+            )
+
+            if body:
+                return body
+
+    # Fall back to HTML
+    for part in parts:
+        if part.get("mimeType") == "text/html":
+            body = decode_body(
+                part.get("body", {}).get("data")
+            )
+
+            if body:
+                soup = BeautifulSoup(body, "html.parser")
+
+                for tag in soup(["script", "style", "noscript"]):
+                    tag.decompose()
+
+                return soup.get_text(" ", strip=True)
+
+    # Handle nested multipart messages
+    for part in parts:
+        if "parts" in part:
+            body = extract_text_from_payload(part)
+
+            if body:
+                return body
+
+    return ""
 
 
 @mcp.tool()
@@ -59,11 +146,19 @@ def get_recent_emails(limit: int = 5):
     return emails
 
 
-
-
 @mcp.tool()
-def search_emails(query: str, limit: int = 5):
-    """Search the user's Gmail messages."""
+def search_emails(query: str, limit: int = 10):
+    """
+    Search the user's Gmail mailbox.
+
+    Use this when you need to discover emails relevant to the
+    user's request. The query should describe what information
+    you are looking for.
+
+    Search results contain email metadata. If a result appears
+    relevant, use get_email with its message ID to inspect the
+    actual email contents before drawing conclusions.
+    """
 
     service = get_gmail_service()
 
@@ -104,7 +199,7 @@ def search_emails(query: str, limit: int = 5):
 
 @mcp.tool()
 def get_email(message_id: str):
-    """Get the full content of a Gmail message."""
+    """Get a cleaned and limited version of a Gmail message."""
 
     service = get_gmail_service()
 
@@ -121,27 +216,17 @@ def get_email(message_id: str):
         for header in headers
     }
 
-    body = ""
+    body = extract_text_from_payload(email["payload"])
 
-    payload = email["payload"]
+    # Normalize whitespace
+    body = " ".join(body.split())
 
-    if "body" in payload and payload["body"].get("data"):
-        import base64
+    # Prevent huge emails from blowing up the LLM context
+    MAX_BODY_LENGTH = 5000
 
-        body = base64.urlsafe_b64decode(
-            payload["body"]["data"]
-        ).decode("utf-8", errors="ignore")
-
-    elif "parts" in payload:
-        for part in payload["parts"]:
-            if part["mimeType"] == "text/plain":
-                if part["body"].get("data"):
-                    import base64
-
-                    body = base64.urlsafe_b64decode(
-                        part["body"]["data"]
-                    ).decode("utf-8", errors="ignore")
-                    break
+    if len(body) > MAX_BODY_LENGTH:
+        body = body[:MAX_BODY_LENGTH]
+        body += "\n[Email body truncated]"
 
     return {
         "id": message_id,
@@ -160,10 +245,12 @@ def create_draft(to: str, subject: str, body: str):
     service = get_gmail_service()
 
     if to.lower() == "me":
-        profile = service.users().getProfile(userId="me").execute()
+        profile = service.users().getProfile(
+            userId="me"
+        ).execute()
+
         to = profile["emailAddress"]
 
-    import base64
     from email.mime.text import MIMEText
 
     message = MIMEText(body)
@@ -191,8 +278,6 @@ def create_draft(to: str, subject: str, body: str):
     }
 
 
-
-
 @mcp.tool()
 def send_email(to: str, subject: str, body: str):
     """Send an email through Gmail."""
@@ -200,10 +285,12 @@ def send_email(to: str, subject: str, body: str):
     service = get_gmail_service()
 
     if to.lower() == "me":
-        profile = service.users().getProfile(userId="me").execute()
+        profile = service.users().getProfile(
+            userId="me"
+        ).execute()
+
         to = profile["emailAddress"]
 
-    import base64
     from email.mime.text import MIMEText
 
     message = MIMEText(body)
@@ -225,7 +312,6 @@ def send_email(to: str, subject: str, body: str):
         "to": to,
         "subject": subject
     }
-
 
 
 @mcp.tool()
@@ -263,6 +349,118 @@ def search_contacts(name: str):
         })
 
     return contacts
+
+
+@mcp.tool()
+def find_upcoming_events(limit: int = 15):
+    """
+    Find actual upcoming events or plans from recent personal emails.
+
+    The tool uses an LLM to extract structured event information
+    from email content. It does not rely on keyword matching.
+    """
+
+    service = get_gmail_service()
+
+    query = (
+        "newer_than:90d "
+        "-category:promotions "
+        "-category:social "
+        "-category:forums "
+        "-category:updates"
+    )
+
+    results = service.users().messages().list(
+        userId="me",
+        q=query,
+        maxResults=limit
+    ).execute()
+
+    messages = results.get("messages", [])
+
+    emails = []
+
+    for message in messages:
+
+        email = service.users().messages().get(
+            userId="me",
+            id=message["id"],
+            format="full"
+        ).execute()
+
+        headers = {
+            header["name"]: header["value"]
+            for header in email["payload"]["headers"]
+        }
+
+        body = extract_text_from_payload(email["payload"])
+        body = " ".join(body.split())
+
+        if not body:
+            continue
+
+        if len(body) > 2500:
+            body = body[:2500] + "\n[Email body truncated]"
+
+        emails.append({
+            "id": message["id"],
+            "from": headers.get("From", ""),
+            "subject": headers.get("Subject", ""),
+            "date": headers.get("Date", ""),
+            "body": body
+        })
+
+    if not emails:
+        return {
+            "events": []
+        }
+
+    email_text = json.dumps(emails, ensure_ascii=False)
+
+    prompt = f"""
+You are an event extraction system.
+
+Analyze these emails and identify ONLY genuine upcoming
+personal events, plans, appointments, meetings, classes,
+trips, reservations, sports activities, or other commitments.
+
+Do NOT treat normal conversations, emotional messages,
+password resets, security notifications, test emails,
+news, promotions, or unrelated messages as events.
+
+Do not guess missing information.
+
+Return ONLY valid JSON in this exact format:
+
+[
+  {{
+    "message_id": "email id",
+    "title": "event name",
+    "date": "YYYY-MM-DD or null",
+    "time": "HH:MM or null",
+    "location": "location or null",
+    "description": "short description"
+  }}
+]
+
+Emails:
+
+{email_text}
+"""
+
+    response = llm.invoke(prompt)
+
+    try:
+        events = json.loads(response.content)
+    except json.JSONDecodeError:
+        return {
+            "events": [],
+            "error": "Could not parse event extraction result."
+        }
+
+    return {
+        "events": events
+    }
 
 if __name__ == "__main__":
     mcp.settings.port = 8001
