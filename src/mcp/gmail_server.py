@@ -227,6 +227,43 @@ def send_email(to: str, subject: str, body: str):
     }
 
 
+
+@mcp.tool()
+def search_contacts(name: str):
+    """Find email addresses from previous Gmail messages involving a person."""
+
+    service = get_gmail_service()
+
+    results = service.users().messages().list(
+        userId="me",
+        q=f'"{name}"',
+        maxResults=10
+    ).execute()
+
+    messages = results.get("messages", [])
+
+    contacts = []
+
+    for message in messages:
+        email = service.users().messages().get(
+            userId="me",
+            id=message["id"],
+            format="metadata",
+            metadataHeaders=["From", "To"]
+        ).execute()
+
+        headers = {
+            h["name"]: h["value"]
+            for h in email["payload"]["headers"]
+        }
+
+        contacts.append({
+            "from": headers.get("From", ""),
+            "to": headers.get("To", "")
+        })
+
+    return contacts
+
 if __name__ == "__main__":
     mcp.settings.port = 8001
     mcp.run(transport="streamable-http")
