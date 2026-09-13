@@ -3,23 +3,41 @@ import os
 
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
+from langchain_core.messages import ToolMessage, SystemMessage, HumanMessage
 
 from src.mcp.client import client
-
-from langchain_core.messages import ToolMessage
 
 load_dotenv()
 
 
 async def run_agent(question, llm_with_tools, tools):
 
-    response = await llm_with_tools.ainvoke(question)
+    messages = [
+        SystemMessage(
+            content=(
+                "You are Aether, a personal AI assistant. "
+                "Use the available tools to complete the user's request. "
+                "If you need another tool after receiving a tool result, "
+                "call it. Continue until the task is complete. "
+                "When you have enough information, directly answer the user."
+            )
+        ),
+        HumanMessage(content=question)
+    ]
 
-    if response.tool_calls:
+    while True:
 
-        tool_messages = []
+        response = await llm_with_tools.ainvoke(messages)
+
+        if not response.tool_calls:
+            return response.content
+
+        messages.append(response)
 
         for tool_call in response.tool_calls:
+
+            print(f"Using tool: {tool_call['name']}")
+            print(f"Arguments: {tool_call['args']}")
 
             tool = next(
                 tool for tool in tools
@@ -30,21 +48,14 @@ async def run_agent(question, llm_with_tools, tools):
                 tool_call["args"]
             )
 
-            tool_messages.append(
+            print("Tool result:", tool_result)
+
+            messages.append(
                 ToolMessage(
                     content=str(tool_result),
                     tool_call_id=tool_call["id"],
                 )
             )
-
-        final_response = await llm_with_tools.ainvoke(
-            [response] + tool_messages
-        )
-
-        return final_response.content
-
-    return response.content
-
 
 
 async def main():
@@ -69,7 +80,6 @@ async def main():
 
     print("\nAssistant:")
     print(answer)
-
 
 
 if __name__ == "__main__":

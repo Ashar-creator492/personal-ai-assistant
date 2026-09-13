@@ -56,6 +56,100 @@ def get_recent_emails(limit: int = 5):
     return emails
 
 
+
+
+@mcp.tool()
+def search_emails(query: str, limit: int = 5):
+    """Search the user's Gmail messages."""
+
+    service = get_gmail_service()
+
+    results = service.users().messages().list(
+        userId="me",
+        q=query,
+        maxResults=limit
+    ).execute()
+
+    messages = results.get("messages", [])
+
+    emails = []
+
+    for message in messages:
+        email = service.users().messages().get(
+            userId="me",
+            id=message["id"],
+            format="metadata",
+            metadataHeaders=["From", "Subject", "Date"]
+        ).execute()
+
+        headers = email["payload"]["headers"]
+
+        header_dict = {
+            header["name"]: header["value"]
+            for header in headers
+        }
+
+        emails.append({
+            "id": message["id"],
+            "from": header_dict.get("From", ""),
+            "subject": header_dict.get("Subject", ""),
+            "date": header_dict.get("Date", "")
+        })
+
+    return emails
+
+
+@mcp.tool()
+def get_email(message_id: str):
+    """Get the full content of a Gmail message."""
+
+    service = get_gmail_service()
+
+    email = service.users().messages().get(
+        userId="me",
+        id=message_id,
+        format="full"
+    ).execute()
+
+    headers = email["payload"]["headers"]
+
+    header_dict = {
+        header["name"]: header["value"]
+        for header in headers
+    }
+
+    body = ""
+
+    payload = email["payload"]
+
+    if "body" in payload and payload["body"].get("data"):
+        import base64
+
+        body = base64.urlsafe_b64decode(
+            payload["body"]["data"]
+        ).decode("utf-8", errors="ignore")
+
+    elif "parts" in payload:
+        for part in payload["parts"]:
+            if part["mimeType"] == "text/plain":
+                if part["body"].get("data"):
+                    import base64
+
+                    body = base64.urlsafe_b64decode(
+                        part["body"]["data"]
+                    ).decode("utf-8", errors="ignore")
+                    break
+
+    return {
+        "id": message_id,
+        "from": header_dict.get("From", ""),
+        "to": header_dict.get("To", ""),
+        "subject": header_dict.get("Subject", ""),
+        "date": header_dict.get("Date", ""),
+        "body": body
+    }
+
+
 if __name__ == "__main__":
     mcp.settings.port = 8001
     mcp.run(transport="streamable-http")
