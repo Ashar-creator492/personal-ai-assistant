@@ -1,92 +1,236 @@
-
 import asyncio
 import os
 
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
-from langchain_core.messages import ToolMessage, SystemMessage, HumanMessage
+from langchain_core.messages import (
+    ToolMessage,
+    SystemMessage,
+    HumanMessage,
+)
 
 from src.mcp.client import client
 
 load_dotenv()
 
 
+SYSTEM_PROMPT = """
+You are Aether, a personal AI assistant.
+
+You have access to external services through MCP tools.
+
+Your job is to understand the user's intent and decide which tools
+are necessary to answer the request.
+
+GENERAL RULES:
+
+1. Understand the user's actual goal before choosing a tool.
+2. Use the tool whose purpose best matches the information you need.
+3. You may call multiple tools when a task requires information
+   from multiple services.
+4. After receiving a tool result, inspect it and decide whether
+   another tool is actually necessary.
+5. Do not repeatedly search for the same information.
+6. Do not search for literal keywords when a better tool strategy
+   exists.
+7. Do not call unrelated tools.
+8. Do not invent information that was not returned by a tool.
+9. When information from multiple tools is relevant, reason across
+   the results before answering.
+10. Once you have enough information, stop using tools and answer
+    the user directly.
+
+GMAIL:
+
+Use Gmail tools when the user's request involves their emails,
+messages, contacts, meetings, appointments, classes, events,
+or information contained in their mailbox.
+
+When a search result identifies a potentially relevant email,
+use get_email to inspect that email before making conclusions
+about its contents.
+
+Do not assume that an email is relevant merely because a search
+keyword appears in its subject.
+
+WEATHER:
+
+Use weather tools when the user's request requires current or
+forecast weather information.
+
+If the user asks a question requiring both Gmail information and
+weather information, you may use both services and combine their
+results.
+
+IMPORTANT:
+
+You are an agent, not a simple keyword search system.
+
+Do not interpret the user's request as:
+"find emails containing the word X."
+
+Instead determine:
+"What information does the user actually need?"
+
+Keep tool usage efficient because external tool results consume
+context.
+"""
+
+
 async def run_agent(question, llm_with_tools, tools):
 
     messages = [
-        SystemMessage(
-            content=(
-                "You are Aether, a personal AI assistant. "
-                "Use the available tools to complete the user's request. "
-                "If you need another tool after receiving a tool result, "
-                "call it. Continue until the task is complete. "
-                "When you have enough information, directly answer the user."
-            )
-        ),
-        HumanMessage(content=question)
+        SystemMessage(content=SYSTEM_PROMPT),
+        HumanMessage(content=question),
     ]
 
-    while True:
+    max_steps = 8
+
+    for step in range(max_steps):
 
         response = await llm_with_tools.ainvoke(messages)
+
+        # --------------------------------------------------
+        # FINAL ANSWER
+        # --------------------------------------------------
 
         if not response.tool_calls:
             return response.content
 
+        # Keep the assistant's tool-call message
         messages.append(response)
+
+        # --------------------------------------------------
+        # TOOL CALLS
+        # --------------------------------------------------
 
         for tool_call in response.tool_calls:
 
-            print(f"Using tool: {tool_call['name']}")
-            print(f"Arguments: {tool_call['args']}")
+            tool_name = tool_call["name"]
+            tool_args = tool_call["args"]
 
-            # Ask for confirmation before sending an email
-            if tool_call["name"] == "send_email":
+            print(f"\nUsing tool: {tool_name}")
+            print(f"Arguments: {tool_args}")
 
-                args = tool_call["args"]
+            # --------------------------------------------------
+            # SEND EMAIL CONFIRMATION
+            # --------------------------------------------------
+
+            if tool_name == "send_email":
 
                 print("\nEmail ready to send:")
-                print(f"To: {args['to']}")
-                print(f"Subject: {args['subject']}")
-                print(f"Body: {args['body']}")
+                print(f"To: {tool_args['to']}")
+                print(f"Subject: {tool_args['subject']}")
+                print(f"Body: {tool_args['body']}")
 
-                confirmation = input("\nSend this email? (yes/no): ")
+                confirmation = input(
+                    "\nSend this email? (yes/no): "
+                ).strip().lower()
 
-                if confirmation.lower() != "yes":
+                if confirmation != "yes":
 
                     print("Email cancelled.")
 
                     messages.append(
                         ToolMessage(
-                            content="The user cancelled the email. Do not send it.",
+                            content=(
+                                "The user cancelled the email. "
+                                "Do not send it."
+                            ),
                             tool_call_id=tool_call["id"],
                         )
                     )
 
                     continue
 
+            # --------------------------------------------------
+            # FIND MCP TOOL
+            # --------------------------------------------------
+
             tool = next(
-                tool for tool in tools
-                if tool.name == tool_call["name"]
+                (
+                    tool
+                    for tool in tools
+                    if tool.name == tool_name
+                ),
+                None,
             )
 
-            tool_result = await tool.ainvoke(
-                tool_call["args"]
-            )
+            if tool is None:
 
-            print("Tool result:", tool_result)
-
-            messages.append(
-                ToolMessage(
-                    content=str(tool_result),
-                    tool_call_id=tool_call["id"],
+                messages.append(
+                    ToolMessage(
+                        content=f"Tool '{tool_name}' was not found.",
+                        tool_call_id=tool_call["id"],
+                    )
                 )
-            )
+
+                continue
+
+            # --------------------------------------------------
+            # EXECUTE TOOL
+            # --------------------------------------------------
+
+            try:
+
+                tool_result = await tool.ainvoke(tool_args)
+
+                print("Tool result:")
+                print(tool_result)
+
+                # Keep tool output reasonably sized so the model
+                # does not hit Groq's context/TPM limits.
+                result_text = str(tool_result)
+
+                MAX_TOOL_RESULT = 6000
+
+                if len(result_text) > MAX_TOOL_RESULT:
+
+                    result_text = (
+                        result_text[:MAX_TOOL_RESULT]
+                        + "\n[Tool result truncated]"
+                    )
+
+                messages.append(
+                    ToolMessage(
+                        content=result_text,
+                        tool_call_id=tool_call["id"],
+                    )
+                )
+
+            except Exception as e:
+
+                print(f"Tool error: {e}")
+
+                messages.append(
+                    ToolMessage(
+                        content=f"Tool execution failed: {str(e)}",
+                        tool_call_id=tool_call["id"],
+                    )
+                )
+
+    return (
+        "I could not complete the request within the allowed "
+        "number of tool steps."
+    )
 
 
 async def main():
 
+    # --------------------------------------------------
+    # LOAD MCP TOOLS
+    # --------------------------------------------------
+
     tools = await client.get_tools()
+
+    print("Available MCP tools:")
+
+    for tool in tools:
+        print(f"- {tool.name}")
+
+    # --------------------------------------------------
+    # LLM
+    # --------------------------------------------------
 
     llm = ChatGroq(
         model="openai/gpt-oss-20b",
@@ -96,12 +240,16 @@ async def main():
 
     llm_with_tools = llm.bind_tools(tools)
 
-    question = input("You: ")
+    # --------------------------------------------------
+    # USER INPUT
+    # --------------------------------------------------
+
+    question = input("\nYou: ")
 
     answer = await run_agent(
         question,
         llm_with_tools,
-        tools
+        tools,
     )
 
     print("\nAssistant:")
@@ -110,4 +258,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

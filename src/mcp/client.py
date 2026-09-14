@@ -1,5 +1,5 @@
+
 import asyncio
-from unittest import result
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
@@ -13,7 +13,11 @@ client = MultiServerMCPClient(
         "gmail": {
             "transport": "streamable_http",
             "url": "http://127.0.0.1:8001/mcp",
-        }
+        },
+        "calendar": {
+            "transport": "streamable_http",
+            "url": "http://127.0.0.1:8002/mcp",
+        },
     }
 )
 
@@ -26,16 +30,18 @@ async def main():
     for tool in tools:
         print(tool.name)
 
-    gmail_tool = next(
-    tool for tool in tools
-    if tool.name == "get_recent_emails"
-)
+    calendar_tool = next(
+        tool
+        for tool in tools
+        if tool.name == "get_upcoming_events"
+    )
 
-    result = await gmail_tool.ainvoke({"limit": 5})
+    result = await calendar_tool.ainvoke({"limit": 10})
 
-    print("\nGmail Result:")
+    print("\nCalendar Result:")
     print(result)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
