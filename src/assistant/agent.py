@@ -1,3 +1,4 @@
+
 import asyncio
 import os
 
@@ -144,6 +145,43 @@ async def run_agent(question, llm_with_tools, tools):
                     continue
 
             # --------------------------------------------------
+            # CALENDAR EVENT CONFIRMATION
+            # --------------------------------------------------
+
+            if tool_name == "create_calendar_event":
+
+                print("\nCalendar event ready to create:")
+                print(f"Title: {tool_args['title']}")
+                print(f"Start: {tool_args['start_time']}")
+                print(f"End: {tool_args['end_time']}")
+
+                if tool_args.get("location"):
+                    print(f"Location: {tool_args['location']}")
+
+                if tool_args.get("description"):
+                    print(f"Description: {tool_args['description']}")
+
+                confirmation = input(
+                    "\nAdd this event to your calendar? (yes/no): "
+                ).strip().lower()
+
+                if confirmation != "yes":
+
+                    print("Calendar event cancelled.")
+
+                    messages.append(
+                        ToolMessage(
+                            content=(
+                                "The user cancelled the calendar event. "
+                                "Do not create it."
+                            ),
+                            tool_call_id=tool_call["id"],
+                        )
+                    )
+
+                    continue
+
+            # --------------------------------------------------
             # FIND MCP TOOL
             # --------------------------------------------------
 
@@ -258,3 +296,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

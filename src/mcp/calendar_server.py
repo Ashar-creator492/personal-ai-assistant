@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 mcp = FastMCP("Calendar Server")
 
 SCOPES = [
-    "https://www.googleapis.com/auth/calendar.readonly"
+    "https://www.googleapis.com/auth/calendar.events"
 ]
 
 
@@ -79,6 +79,52 @@ def get_upcoming_events(limit: int = 10):
             break
 
     return results
+
+@mcp.tool()
+def create_calendar_event(
+    title: str,
+    start_time: str,
+    end_time: str,
+    location: str = "",
+    description: str = ""
+):
+    """
+    Create a new event in the user's primary Google Calendar.
+    """
+
+    service = get_calendar_service()
+
+    event = {
+        "summary": title,
+        "start": {
+            "dateTime": start_time,
+            "timeZone": "Asia/Karachi",
+        },
+        "end": {
+            "dateTime": end_time,
+            "timeZone": "Asia/Karachi",
+        },
+    }
+
+    if location:
+        event["location"] = location
+
+    if description:
+        event["description"] = description
+
+    created_event = service.events().insert(
+        calendarId="primary",
+        body=event
+    ).execute()
+
+    return {
+        "id": created_event.get("id"),
+        "title": created_event.get("summary"),
+        "start": created_event.get("start", {}).get("dateTime"),
+        "end": created_event.get("end", {}).get("dateTime"),
+        "location": created_event.get("location", ""),
+        "description": created_event.get("description", ""),
+    }
 
 
 if __name__ == "__main__":
