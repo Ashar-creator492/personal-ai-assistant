@@ -10,6 +10,11 @@ from langchain_core.messages import (
     HumanMessage,
 )
 
+
+from langgraph.graph.message import add_messages
+from typing import Annotated, TypedDict
+from langgraph.graph import StateGraph, START, END
+
 from src.mcp.client import client
 
 load_dotenv()
@@ -110,6 +115,190 @@ Instead determine:
 Keep tool usage efficient because external tool results consume
 context.
 """
+
+
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]
+    
+
+def create_aether_node(llm_with_tools):
+
+    async def aether_node(state: AgentState):
+
+        response = await llm_with_tools.ainvoke(
+            state["messages"]
+        )
+
+        return {
+            "messages": [response]
+        }
+
+    return aether_node
+
+
+def create_tool_node(tools):
+
+    async def tool_node(state: AgentState):
+
+        last_message = state["messages"][-1]
+
+        tool_messages = []
+
+        for tool_call in last_message.tool_calls:
+
+            tool_name = tool_call["name"]
+            tool_args = tool_call["args"]
+
+            print(f"\nUsing tool: {tool_name}")
+            print(f"Arguments: {tool_args}")
+
+            # --------------------------------------------------
+            # SEND EMAIL CONFIRMATION
+            # --------------------------------------------------
+
+            if tool_name == "send_email":
+
+                print("\nEmail ready to send:")
+                print(f"To: {tool_args['to']}")
+                print(f"Subject: {tool_args['subject']}")
+                print(f"Body: {tool_args['body']}")
+
+                confirmation = input(
+                    "\nSend this email? (yes/no): "
+                ).strip().lower()
+
+                if confirmation != "yes":
+
+                    print("Email cancelled.")
+
+                    tool_messages.append(
+                        ToolMessage(
+                            content=(
+                                "The user cancelled the email. "
+                                "Do not send it."
+                            ),
+                            tool_call_id=tool_call["id"],
+                        )
+                    )
+
+                    continue
+
+            # --------------------------------------------------
+            # CALENDAR EVENT CONFIRMATION
+            # --------------------------------------------------
+
+            if tool_name == "create_calendar_event":
+
+                print("\nCalendar event ready to create:")
+                print(f"Title: {tool_args['title']}")
+                print(f"Start: {tool_args['start_time']}")
+                print(f"End: {tool_args['end_time']}")
+
+                if tool_args.get("location"):
+                    print(f"Location: {tool_args['location']}")
+
+                if tool_args.get("description"):
+                    print(f"Description: {tool_args['description']}")
+
+                confirmation = input(
+                    "\nAdd this event to your calendar? (yes/no): "
+                ).strip().lower()
+
+                if confirmation != "yes":
+
+                    print("Calendar event cancelled.")
+
+                    tool_messages.append(
+                        ToolMessage(
+                            content=(
+                                "The user cancelled the calendar event. "
+                                "Do not create it."
+                            ),
+                            tool_call_id=tool_call["id"],
+                        )
+                    )
+
+                    continue
+
+            # --------------------------------------------------
+            # FIND MCP TOOL
+            # --------------------------------------------------
+
+            tool = next(
+                (
+                    tool
+                    for tool in tools
+                    if tool.name == tool_name
+                ),
+                None,
+            )
+
+            if tool is None:
+
+                tool_messages.append(
+                    ToolMessage(
+                        content=f"Tool '{tool_name}' was not found.",
+                        tool_call_id=tool_call["id"],
+                    )
+                )
+
+                continue
+
+            # --------------------------------------------------
+            # EXECUTE TOOL
+            # --------------------------------------------------
+
+            try:
+
+                tool_result = await tool.ainvoke(tool_args)
+
+                print("Tool result:")
+                print(tool_result)
+
+                result_text = str(tool_result)
+
+                MAX_TOOL_RESULT = 6000
+
+                if len(result_text) > MAX_TOOL_RESULT:
+
+                    result_text = (
+                        result_text[:MAX_TOOL_RESULT]
+                        + "\n[Tool result truncated]"
+                    )
+
+                tool_messages.append(
+                    ToolMessage(
+                        content=result_text,
+                        tool_call_id=tool_call["id"],
+                    )
+                )
+
+            except Exception as e:
+
+                print(f"Tool error: {e}")
+
+                tool_messages.append(
+                    ToolMessage(
+                        content=f"Tool execution failed: {str(e)}",
+                        tool_call_id=tool_call["id"],
+                    )
+                )
+
+        return {
+            "messages": tool_messages
+        }
+
+    return tool_node
+
+
+def should_continue(state: AgentState):
+
+    last_message = state["messages"][-1]
+
+    if last_message.tool_calls:
+        return "tools"
+
+    return END
 
 
 async def run_agent(question, llm_with_tools, tools):
@@ -313,21 +502,54 @@ async def main():
     llm_with_tools = llm.bind_tools(tools)
 
     # --------------------------------------------------
+    # LANGGRAPH
+    # --------------------------------------------------
+
+    graph = StateGraph(AgentState)
+
+    graph.add_node(
+        "aether",
+        create_aether_node(llm_with_tools)
+    )
+
+    graph.add_node(
+        "tools",
+        create_tool_node(tools)
+    )
+
+    graph.add_edge(START, "aether")
+
+    graph.add_conditional_edges(
+        "aether",
+        should_continue,
+        {
+            "tools": "tools",
+            END: END,
+        },
+    )
+
+    graph.add_edge("tools", "aether")
+
+    app = graph.compile()
+
+    # --------------------------------------------------
     # USER INPUT
     # --------------------------------------------------
 
     question = input("\nYou: ")
 
-    answer = await run_agent(
-        question,
-        llm_with_tools,
-        tools,
-    )
+    result = await app.ainvoke(
+    {
+        "messages": [
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=question)
+        ]
+    }
+)
 
     print("\nAssistant:")
-    print(answer)
+    print(result["messages"][-1].content)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
