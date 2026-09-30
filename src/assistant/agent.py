@@ -2,6 +2,10 @@
 import asyncio
 import os
 
+import asyncio
+import os
+import uuid
+
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_core.messages import (
@@ -14,6 +18,8 @@ from langchain_core.messages import (
 from langgraph.graph.message import add_messages
 from typing import Annotated, TypedDict
 from langgraph.graph import StateGraph, START, END
+
+from langgraph.checkpoint.memory import InMemorySaver
 
 from src.mcp.client import client
 
@@ -529,27 +535,41 @@ async def main():
     )
 
     graph.add_edge("tools", "aether")
+    
+    checkpointer = InMemorySaver()
 
-    app = graph.compile()
+    app = graph.compile(checkpointer=checkpointer)
 
     # --------------------------------------------------
     # USER INPUT
     # --------------------------------------------------
 
-    question = input("\nYou: ")
+    thread_id = str(uuid.uuid4())
 
-    result = await app.ainvoke(
-    {
-        "messages": [
-            SystemMessage(content=SYSTEM_PROMPT),
-            HumanMessage(content=question)
-        ]
+    config = {
+    "configurable": {
+        "thread_id": thread_id
     }
-)
+}
 
-    print("\nAssistant:")
-    print(result["messages"][-1].content)
+    while True:
 
+        question = input("\nYou: ")
+
+        if question.lower() in {"exit", "quit"}:
+            break
+
+        result = await app.ainvoke(
+            {
+            "messages": [
+                HumanMessage(content=question)
+            ]
+        },
+            config=config
+    )
+
+        print("\nAssistant:")
+        print(result["messages"][-1].content)
 
 if __name__ == "__main__":
     asyncio.run(main())
