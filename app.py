@@ -23,7 +23,7 @@ SUGGESTIONS = (
     "Weather in Rawalpindi",
     "Draft an email",
 )
-EMOJI = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF\ufe0f\u200d]")
+EMOJI = re.compile("[\U0001F1E6-\U0001F1FF\U0001F300-\U0001FAFF\u2600-\u27BF\ufe0f\u200d\u20e3]")
 LOCAL_TIME = ZoneInfo("Asia/Karachi")
 
 
@@ -40,7 +40,6 @@ def setup_page():
     logo = ROOT / "assets" / ("logo_dark.svg" if st.session_state.get("dark_mode") else "logo.svg")
     st.set_page_config(page_title="Aether", page_icon=str(logo),
                        layout="wide", initial_sidebar_state="expanded")
-    st.logo(str(logo), size="small")
     marker = '<span class="aether-dark-marker" hidden></span>' if st.session_state.get("dark_mode") else ""
     st.markdown(f"<style>{(ROOT / 'styles.css').read_text(encoding='utf-8')}</style>{marker}",
                 unsafe_allow_html=True)
@@ -68,6 +67,19 @@ def group_for(snapshot, name):
     return "Earlier"
 
 
+def relative_time(snapshot):
+    created_at = getattr(snapshot, "created_at", None)
+    if not created_at:
+        return ""
+    when = created_at if isinstance(created_at, datetime) else datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    elapsed = max(0, int((datetime.now(LOCAL_TIME) - when.astimezone(LOCAL_TIME)).total_seconds()))
+    if elapsed < 3600:
+        return f"{max(1, elapsed // 60)}m"
+    if elapsed < 86400:
+        return f"{elapsed // 3600}h"
+    return f"{elapsed // 86400}d"
+
+
 def sidebar(manager, conversations, snapshots):
     with st.sidebar:
         st.markdown(f'<div class="sidebar-brand"><img src="{logo_image()}" alt=""/>'
@@ -89,13 +101,17 @@ def sidebar(manager, conversations, snapshots):
             for name, thread_id in items:
                 active = name == st.session_state.active_conversation
                 with st.container(key="active-conversation" if active else f"conversation-{thread_id}"):
-                    row, menu = st.columns([5, 1], gap="small", vertical_alignment="center")
+                    row, time_col, menu = st.columns([5, 1.1, .7], gap=None, vertical_alignment="center")
                     with row:
-                        if st.button(name, key=f"select-{thread_id}", help=name, use_container_width=True):
+                        if st.button(name, key=f"select-{thread_id}", icon=":material/chat_bubble_outline:",
+                                     use_container_width=True):
                             st.session_state.active_conversation = name
                             st.rerun()
+                    with time_col:
+                        st.markdown(f'<span class="row-time">{relative_time(snapshots[name])}</span>',
+                                    unsafe_allow_html=True)
                     with menu:
-                        with st.popover("..."):
+                        with st.popover("...", key=f"menu-{thread_id}"):
                             with st.form(f"rename-{thread_id}"):
                                 new_name = st.text_input("Rename", value=name)
                                 if st.form_submit_button("Save", use_container_width=True):
@@ -187,9 +203,12 @@ def render_structured(kind, data):
         rows = []
         for item in data if isinstance(data, list) else [data]:
             if isinstance(item, dict) and "subject" in item:
-                rows.append(f'<div class="email-row"><span class="result-title">{clean(item.get("subject", "Untitled"))}</span>'
+                sender = str(item.get("from", ""))
+                initial = next((character.upper() for character in sender if character.isalpha()), "?")
+                rows.append(f'<div class="email-row"><span class="sender-tile">{clean(initial)}</span>'
+                            f'<span class="result-title">{clean(item.get("subject", "Untitled"))}</span>'
                             f'<span class="result-meta">{clean(item.get("date", ""))}</span>'
-                            f'<span class="result-meta">{clean(item.get("from", ""))}</span></div>')
+                            f'<span class="result-meta sender-name">{clean(sender)}</span></div>')
         if rows:
             st.markdown('<div class="result-list">' + "".join(rows) + "</div>", unsafe_allow_html=True)
             return True
@@ -214,7 +233,8 @@ def render_structured(kind, data):
             details.append(f'{clean(data["humidity"])}% humidity')
         if "wind_speed" in data:
             details.append(f'{clean(data["wind_speed"])} km/h wind')
-        st.markdown('<div class="weather-row">' + "<span>·</span>".join(details) + '</div>', unsafe_allow_html=True)
+        st.markdown('<div class="weather-row"><span class="service-tile weather-tile material-symbols-outlined">partly_cloudy_day</span>'
+                    + "<span>·</span>".join(details) + '</div>', unsafe_allow_html=True)
         return True
     if kind == "get_forecast" and isinstance(data, dict) and "dates" in data:
         rows = []
@@ -250,6 +270,7 @@ def message_list(messages):
     visible = False
     tool_names = {}
     results = []
+    action_records = []
     for message in messages:
         if isinstance(message, AIMessage) and message.tool_calls:
             tool_names.update({call["id"]: call["name"] for call in message.tool_calls})
@@ -259,6 +280,15 @@ def message_list(messages):
             data = parse_payload(message.content)
             if kind and data is not None:
                 results.append((kind, data))
+            if kind in {"send_email", "create_calendar_event"}:
+                if "cancelled" in str(message.content).lower():
+                    action_records.append("Email cancelled" if kind == "send_email" else "Event cancelled")
+                elif kind == "send_email":
+                    action_records.append("Email sent" if isinstance(data, dict) and data.get("status") == "email_sent"
+                                          else "Email request finished")
+                else:
+                    action_records.append("Event created" if isinstance(data, dict) and data.get("id")
+                                          else "Event request finished")
             continue
         if not isinstance(message, (HumanMessage, AIMessage)) or not message.content:
             continue
@@ -266,49 +296,71 @@ def message_list(messages):
         role = "user" if isinstance(message, HumanMessage) else "assistant"
         logo = ROOT / "assets" / ("logo_dark.svg" if st.session_state.get("dark_mode") else "logo.svg")
         with st.chat_message(role, avatar=str(logo) if role == "assistant" else None):
-            render_content(message.content, remove_emoji=role == "assistant")
+            content = message.content
+            if role == "assistant" and results:
+                content = re.sub(r"(?m)^\|.*(?:\n|$)", "", content).strip()
+            if content:
+                render_content(content, remove_emoji=role == "assistant")
             if role == "assistant":
                 for kind, data in results:
                     render_structured(kind, data)
                 results.clear()
+                for record in action_records:
+                    st.markdown(f'<div class="action-result">✓ {safe(record)}</div>', unsafe_allow_html=True)
+                action_records.clear()
             if message.additional_kwargs.get("aether_time"):
                 st.markdown(f'<div class="message-time">{safe(message.additional_kwargs["aether_time"])}</div>',
                             unsafe_allow_html=True)
             if role == "assistant":
                 copy_control(strip_emojis(str(message.content)))
+    for record in action_records:
+        st.markdown(f'<div class="action-result">✓ {safe(record)}</div>', unsafe_allow_html=True)
     return visible
 
 
 def copy_control(content):
     value = base64.b64encode(content.encode("utf-8")).decode("ascii")
     st.iframe(f"""
-      <style>body {{ margin:0; font:11px Inter, sans-serif; }}
-      button {{ border:0; padding:3px 0; background:transparent; color:#8A8A90; cursor:pointer; }}</style>
-      <button id="copy" aria-label="Copy response">Copy</button>
+      <style>body {{ margin:0; }}
+      button {{ border:0; padding:2px; background:transparent; color:#8A8A90; cursor:pointer; }}
+      svg {{ width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }}</style>
+      <button id="copy" aria-label="Copy response" title="Copy response"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg></button>
       <script>
         const value = new TextDecoder().decode(Uint8Array.from(atob('{value}'), c => c.charCodeAt(0)));
         document.getElementById('copy').onclick = async () => {{
-          try {{ await navigator.clipboard.writeText(value); document.getElementById('copy').textContent = 'Copied'; }}
+          try {{ await navigator.clipboard.writeText(value); document.getElementById('copy').title = 'Copied'; }}
           catch {{ const input = document.createElement('textarea'); input.value = value;
             document.body.appendChild(input); input.select(); const copied = document.execCommand('copy'); input.remove();
-            document.getElementById('copy').textContent = copied ? 'Copied' : 'Copy unavailable'; }}
+            document.getElementById('copy').title = copied ? 'Copied' : 'Copy unavailable'; }}
         }};
-      </script>""", width=52, height=25)
+      </script>""", width=24, height=24)
 
 
 def empty_state():
+    hour = datetime.now(LOCAL_TIME).hour
+    greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 17 else "Good evening"
     st.markdown(f'<div class="empty-state"><img src="{logo_image()}" alt=""/>'
-                '<div class="empty-title">How can I help?</div>'
+                f'<div class="empty-title">{greeting}</div>'
                 '<div class="empty-subtitle">Ask about your inbox, calendar, or the weather.</div></div>',
                 unsafe_allow_html=True)
-    with st.container(key="suggestion-chips"):
-        for row in (SUGGESTIONS[:2], SUGGESTIONS[2:]):
+    cards = (("Unread emails", "See what needs your attention", "mail", "gmail"),
+             ("This week’s calendar", "Find your upcoming plans", "calendar_month", "calendar"),
+             ("Weather in Rawalpindi", "Check today’s conditions", "partly_cloudy_day", "weather"),
+             ("Draft an email", "Start a message", "edit_square", "gmail"))
+    with st.container(key="suggestion-cards"):
+        for row in ((0, 1), (2, 3)):
             columns = st.columns(2)
-            for column, suggestion in zip(columns, row):
+            for column, index in zip(columns, row):
+                title, description, icon, service = cards[index]
                 with column:
-                    if st.button(suggestion, key=f"suggest-{suggestion}", type="secondary",
-                                 use_container_width=True):
-                        return suggestion
+                    with st.container(key=f"suggestion-{index}"):
+                        st.markdown(f'<span class="service-tile {service}-tile material-symbols-outlined">{icon}</span>',
+                                    unsafe_allow_html=True)
+                        st.markdown(f'<div class="suggestion-title">{safe(title)}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="suggestion-description">{safe(description)}</div>', unsafe_allow_html=True)
+                        if st.button(title, key=f"suggest-{SUGGESTIONS[index]}", type="secondary",
+                                     use_container_width=True):
+                            return SUGGESTIONS[index]
     return None
 
 
@@ -325,7 +377,8 @@ def confirmation_card(actions):
     for action in actions:
         action_id, kind, args = action["id"], action["name"], action["args"]
         with st.container(border=True, key=f"approval-{action_id}"):
-            st.markdown("**Send email**" if kind == "send_email" else "**Create calendar event**")
+            st.markdown('<div class="approval-heading">' + ("Send email" if kind == "send_email" else "Create calendar event")
+                        + '</div>', unsafe_allow_html=True)
             if kind == "send_email":
                 st.write(f"To: {args.get('to', '')}")
                 st.write(f"Subject: {args.get('subject', '')}")
@@ -355,39 +408,15 @@ def confirmation_card(actions):
         activity = []
         with st.status("Completing request...", expanded=True) as status:
             try:
-                result = asyncio.run(invoke_agent(st.session_state.thread_id, approvals=decisions,
-                                                  progress=lambda name: update_activity(status, name, activity)))
+                asyncio.run(invoke_agent(st.session_state.thread_id, approvals=decisions,
+                                         progress=lambda name: update_activity(status, name, activity)))
             except Exception as error:
                 status.update(state="error", expanded=False)
                 st.error(f"Could not complete the request: {error}")
                 return
             status.update(label="Request finished", state="complete", expanded=False)
-        st.session_state.setdefault("action_results", {})[st.session_state.thread_id] = approval_result(actions, decisions, result)
         st.session_state[decision_key] = {}
         st.rerun()
-
-
-def approval_result(actions, decisions, result):
-    if not any(decisions.values()):
-        return "Cancelled"
-    messages = result.get("messages", []) if isinstance(result, dict) else []
-    labels = []
-    for action in actions:
-        if not decisions.get(action["id"]):
-            labels.append("Cancelled")
-            continue
-        tool_message = next((message for message in messages if isinstance(message, ToolMessage)
-                             and message.tool_call_id == action["id"]), None)
-        payload = parse_payload(tool_message.content) if tool_message else None
-        if isinstance(payload, list) and len(payload) == 1:
-            payload = payload[0]
-        if action["name"] == "send_email" and isinstance(payload, dict) and payload.get("status") == "email_sent":
-            labels.append("Email sent")
-        elif action["name"] == "create_calendar_event" and isinstance(payload, dict) and payload.get("id"):
-            labels.append("Event created")
-        else:
-            labels.append("Request finished")
-    return " · ".join(labels)
 
 
 def title_from_prompt(prompt, conversations):
@@ -404,29 +433,29 @@ def title_from_prompt(prompt, conversations):
     return title
 
 
-def send_message(thread_id, prompt, first_turn=False):
+def send_message(thread_id, prompt, first_turn=False, activity_slot=None):
     if first_turn and re.fullmatch(r"New conversation(?: \d+)?", st.session_state.active_conversation):
         manager = ConversationManager(ROOT / "conversations.json")
         title = title_from_prompt(prompt, manager.list())
         manager.rename(st.session_state.active_conversation, title)
         st.session_state.active_conversation = title
-    st.session_state.setdefault("action_results", {}).pop(thread_id, None)
     activity = []
-    with st.status("Aether is working...", expanded=True) as status:
-        try:
-            result = asyncio.run(invoke_agent(thread_id, message=prompt,
-                                              progress=lambda name: update_activity(status, name, activity)))
-        except Exception as error:
-            status.update(state="error", expanded=False)
-            st.error(f"Could not reach Aether services: {error}")
-            return
-        if isinstance(result, dict) and "__interrupt__" in result:
-            status.update(label="Awaiting confirmation", state="complete", expanded=False)
-            st.session_state.setdefault("activity_summaries", {}).pop(thread_id, None)
-        else:
-            summary = " · ".join(activity) if activity else "Response ready"
-            status.update(label=f"Completed · {summary}", state="complete", expanded=False)
-            st.session_state.setdefault("activity_summaries", {})[thread_id] = f"✓ {summary}"
+    with (activity_slot.container() if activity_slot else st.container()):
+        with st.status("Aether is working...", expanded=True) as status:
+            try:
+                result = asyncio.run(invoke_agent(thread_id, message=prompt,
+                                                  progress=lambda name: update_activity(status, name, activity)))
+            except Exception as error:
+                status.update(state="error", expanded=False)
+                st.error(f"Could not reach Aether services: {error}")
+                return
+            if isinstance(result, dict) and "__interrupt__" in result:
+                status.update(label="Awaiting confirmation", state="complete", expanded=False)
+                st.session_state.setdefault("activity_summaries", {}).pop(thread_id, None)
+            else:
+                summary = " · ".join(activity) if activity else "Response ready"
+                status.update(label=f"Completed · {summary}", state="complete", expanded=False)
+                st.session_state.setdefault("activity_summaries", {})[thread_id] = f"✓ {summary}"
     st.rerun()
 
 
@@ -441,7 +470,9 @@ def update_activity(status, tool_name, activity):
         return
     if service not in activity:
         activity.append(service)
-        status.write(f"Checking {service}...")
+        icon = {"Gmail": "mail", "Calendar": "calendar_month", "Weather": "partly_cloudy_day"}[service]
+        status.markdown(f'<div class="tool-activity"><span class="service-tile {service.lower()}-tile '
+                        f'material-symbols-outlined">{icon}</span>{service}: checking</div>', unsafe_allow_html=True)
     status.update(label=f"Working with {service}...")
 
 
@@ -470,19 +501,17 @@ def main():
         if st.session_state.get("activity_summaries", {}).get(thread_id):
             st.markdown(f'<div class="activity-summary">{safe(st.session_state.activity_summaries[thread_id])}</div>',
                         unsafe_allow_html=True)
-        if st.session_state.get("action_results", {}).get(thread_id):
-            st.markdown(f'<div class="action-result">{safe(st.session_state.action_results[thread_id])}</div>',
-                        unsafe_allow_html=True)
+        activity_slot = st.empty()
         if actions:
             confirmation_card(actions)
         elif not has_messages:
             suggestion = empty_state()
             if suggestion:
-                send_message(thread_id, suggestion, first_turn=True)
+                send_message(thread_id, suggestion, first_turn=True, activity_slot=activity_slot)
     prompt = st.chat_input("Message Aether", disabled=bool(actions))
     if prompt:
         first_turn = not any(isinstance(message, HumanMessage) for message in messages)
-        send_message(thread_id, prompt, first_turn=first_turn)
+        send_message(thread_id, prompt, first_turn=first_turn, activity_slot=activity_slot)
 
 
 if __name__ == "__main__":

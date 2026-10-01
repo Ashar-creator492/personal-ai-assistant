@@ -54,6 +54,9 @@ class AppTests(unittest.TestCase):
                     ToolMessage(content=str([{"type": "text", "text": '{"city":"Lahore","temperature":30,"humidity":50}'}]),
                                 tool_call_id="weather-1"),
                     AIMessage(content="Here is the weather"),
+                    AIMessage(content="", tool_calls=[{"id": "send-1", "name": "send_email", "args": {}}]),
+                    ToolMessage(content='{"status":"email_sent"}', tool_call_id="send-1"),
+                    AIMessage(content="Done"),
                 ]}, tasks=[])
 
             with patch("src.assistant.conversations.ConversationManager", return_value=manager), \
@@ -66,6 +69,7 @@ class AppTests(unittest.TestCase):
                 self.assertIn("Update", output)
                 self.assertIn("Alice", output)
                 self.assertIn("Lahore", output)
+                self.assertIn("Email sent", output)
                 self.assertNotIn('{"city"', output)
                 self.assertNotIn("😊", output)
 
