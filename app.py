@@ -206,7 +206,7 @@ def render_structured(kind, data):
                 sender = str(item.get("from", ""))
                 initial = next((character.upper() for character in sender if character.isalpha()), "?")
                 rows.append(f'<div class="email-row"><span class="sender-tile">{clean(initial)}</span>'
-                            f'<span class="result-title">{clean(item.get("subject", "Untitled"))}</span>'
+                            f'<span class="result-title">{clean(item.get("subject") or "Untitled")}</span>'
                             f'<span class="result-meta">{clean(item.get("date", ""))}</span>'
                             f'<span class="result-meta sender-name">{clean(sender)}</span></div>')
         if rows:
@@ -296,15 +296,14 @@ def message_list(messages):
         role = "user" if isinstance(message, HumanMessage) else "assistant"
         logo = ROOT / "assets" / ("logo_dark.svg" if st.session_state.get("dark_mode") else "logo.svg")
         with st.chat_message(role, avatar=str(logo) if role == "assistant" else None):
-            content = message.content
-            if role == "assistant" and results:
-                content = re.sub(r"(?m)^\|.*(?:\n|$)", "", content).strip()
-            if content:
-                render_content(content, remove_emoji=role == "assistant")
+            rendered_result = False
             if role == "assistant":
                 for kind, data in results:
-                    render_structured(kind, data)
+                    rendered_result = render_structured(kind, data) or rendered_result
                 results.clear()
+            if message.content and not rendered_result:
+                render_content(message.content, remove_emoji=role == "assistant")
+            if role == "assistant":
                 for record in action_records:
                     st.markdown(f'<div class="action-result">✓ {safe(record)}</div>', unsafe_allow_html=True)
                 action_records.clear()
@@ -471,8 +470,13 @@ def update_activity(status, tool_name, activity):
     if service not in activity:
         activity.append(service)
         icon = {"Gmail": "mail", "Calendar": "calendar_month", "Weather": "partly_cloudy_day"}[service]
+        detail = ("sending email" if tool_name == "send_email" else
+                  "drafting email" if "draft" in tool_name else
+                  "searching inbox" if service == "Gmail" else
+                  "creating event" if tool_name == "create_calendar_event" else
+                  "checking events" if service == "Calendar" else "checking conditions")
         status.markdown(f'<div class="tool-activity"><span class="service-tile {service.lower()}-tile '
-                        f'material-symbols-outlined">{icon}</span>{service}: checking</div>', unsafe_allow_html=True)
+                        f'material-symbols-outlined">{icon}</span>{service}: {detail}</div>', unsafe_allow_html=True)
     status.update(label=f"Working with {service}...")
 
 

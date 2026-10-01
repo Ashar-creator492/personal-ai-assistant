@@ -70,6 +70,8 @@ class AppTests(unittest.TestCase):
                 self.assertIn("Alice", output)
                 self.assertIn("Lahore", output)
                 self.assertIn("Email sent", output)
+                self.assertNotIn("Here is the weather", output)
+                self.assertNotIn("Here is your mail", output)
                 self.assertNotIn('{"city"', output)
                 self.assertNotIn("😊", output)
 
