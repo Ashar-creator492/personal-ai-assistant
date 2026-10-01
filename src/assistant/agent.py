@@ -1,10 +1,5 @@
-
 import asyncio
 import os
-
-import asyncio
-import os
-import uuid
 
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
@@ -19,9 +14,10 @@ from langgraph.graph.message import add_messages
 from typing import Annotated, TypedDict
 from langgraph.graph import StateGraph, START, END
 
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from src.mcp.client import client
+from src.assistant.conversations import ConversationManager
 
 load_dotenv()
 
@@ -482,6 +478,13 @@ async def run_agent(question, llm_with_tools, tools):
     )
 
 
+
+def create_conversation(name):
+    return ConversationManager().create(name)
+
+
+
+
 async def main():
 
     # --------------------------------------------------
@@ -535,41 +538,66 @@ async def main():
     )
 
     graph.add_edge("tools", "aether")
-    
-    checkpointer = InMemorySaver()
 
-    app = graph.compile(checkpointer=checkpointer)
+    async with AsyncSqliteSaver.from_conn_string("checkpoints.db") as checkpointer:
 
-    # --------------------------------------------------
-    # USER INPUT
-    # --------------------------------------------------
+        app = graph.compile(checkpointer=checkpointer)
 
-    thread_id = str(uuid.uuid4())
+        # --------------------------------------------------
+        # USER INPUT
+        # --------------------------------------------------
 
-    config = {
-    "configurable": {
-        "thread_id": thread_id
-    }
-}
+        conversations = ConversationManager()
+        while True:
+            saved = conversations.list()
+            print("\nConversations:")
+            for name in saved:
+                print(f"- {name}")
+            choice = input("Name to open, or 'new', 'rename', 'delete', 'quit': ").strip()
+            if choice.lower() in {"quit", "exit"}:
+                return
+            try:
+                if choice.lower() == "new":
+                    conversation_name = input("New conversation name: ").strip()
+                    thread_id = conversations.create(conversation_name)
+                    break
+                if choice.lower() == "rename":
+                    conversations.rename(input("Existing name: ").strip(), input("New name: ").strip())
+                    continue
+                if choice.lower() == "delete":
+                    name = input("Conversation to delete: ").strip()
+                    if input(f"Delete '{name}' from the list? (yes/no): ").strip().lower() == "yes":
+                        conversations.delete(name)
+                    continue
+                thread_id = conversations.get(choice)
+                break
+            except (KeyError, ValueError) as error:
+                print(f"Conversation error: {error}")
 
-    while True:
+        config = {
+            "configurable": {
+                "thread_id": thread_id
+            }
+        }
 
-        question = input("\nYou: ")
+        while True:
 
-        if question.lower() in {"exit", "quit"}:
-            break
+            question = input("\nYou: ")
 
-        result = await app.ainvoke(
-            {
-            "messages": [
-                HumanMessage(content=question)
-            ]
-        },
-            config=config
-    )
+            if question.lower() in {"exit", "quit"}:
+                break
 
-        print("\nAssistant:")
-        print(result["messages"][-1].content)
+            result = await app.ainvoke(
+                {
+                    "messages": [
+                        HumanMessage(content=question)
+                    ]
+                },
+                config=config
+            )
+
+            print("\nAssistant:")
+            print(result["messages"][-1].content)
 
 if __name__ == "__main__":
     asyncio.run(main())

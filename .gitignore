@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 credentials.json
 token.json
+conversations.json
+checkpoints.db*
