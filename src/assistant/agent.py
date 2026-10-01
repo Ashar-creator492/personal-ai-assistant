@@ -1,5 +1,7 @@
 import asyncio
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
@@ -13,6 +15,7 @@ from langchain_core.messages import (
 from langgraph.graph.message import add_messages
 from typing import Annotated, TypedDict
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import Command, interrupt
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
@@ -121,6 +124,7 @@ context.
 
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
+    approvals: dict
     
 
 def create_aether_node(llm_with_tools):
@@ -130,6 +134,7 @@ def create_aether_node(llm_with_tools):
         response = await llm_with_tools.ainvoke(
             state["messages"]
         )
+        response.additional_kwargs["aether_time"] = datetime.now(ZoneInfo("Asia/Karachi")).strftime("%I:%M %p")
 
         return {
             "messages": [response]
@@ -138,7 +143,7 @@ def create_aether_node(llm_with_tools):
     return aether_node
 
 
-def create_tool_node(tools):
+def create_tool_node(tools, progress=None):
 
     async def tool_node(state: AgentState):
 
@@ -150,77 +155,15 @@ def create_tool_node(tools):
 
             tool_name = tool_call["name"]
             tool_args = tool_call["args"]
+            if progress:
+                progress(tool_name)
 
-            print(f"\nUsing tool: {tool_name}")
-            print(f"Arguments: {tool_args}")
-
-            # --------------------------------------------------
-            # SEND EMAIL CONFIRMATION
-            # --------------------------------------------------
-
-            if tool_name == "send_email":
-
-                print("\nEmail ready to send:")
-                print(f"To: {tool_args['to']}")
-                print(f"Subject: {tool_args['subject']}")
-                print(f"Body: {tool_args['body']}")
-
-                confirmation = input(
-                    "\nSend this email? (yes/no): "
-                ).strip().lower()
-
-                if confirmation != "yes":
-
-                    print("Email cancelled.")
-
-                    tool_messages.append(
-                        ToolMessage(
-                            content=(
-                                "The user cancelled the email. "
-                                "Do not send it."
-                            ),
-                            tool_call_id=tool_call["id"],
-                        )
-                    )
-
-                    continue
-
-            # --------------------------------------------------
-            # CALENDAR EVENT CONFIRMATION
-            # --------------------------------------------------
-
-            if tool_name == "create_calendar_event":
-
-                print("\nCalendar event ready to create:")
-                print(f"Title: {tool_args['title']}")
-                print(f"Start: {tool_args['start_time']}")
-                print(f"End: {tool_args['end_time']}")
-
-                if tool_args.get("location"):
-                    print(f"Location: {tool_args['location']}")
-
-                if tool_args.get("description"):
-                    print(f"Description: {tool_args['description']}")
-
-                confirmation = input(
-                    "\nAdd this event to your calendar? (yes/no): "
-                ).strip().lower()
-
-                if confirmation != "yes":
-
-                    print("Calendar event cancelled.")
-
-                    tool_messages.append(
-                        ToolMessage(
-                            content=(
-                                "The user cancelled the calendar event. "
-                                "Do not create it."
-                            ),
-                            tool_call_id=tool_call["id"],
-                        )
-                    )
-
-                    continue
+            if tool_name in {"send_email", "create_calendar_event"} and not state.get("approvals", {}).get(tool_call["id"]):
+                tool_messages.append(ToolMessage(
+                    content="The user cancelled this action. Do not perform it.",
+                    tool_call_id=tool_call["id"],
+                ))
+                continue
 
             # --------------------------------------------------
             # FIND MCP TOOL
@@ -254,9 +197,6 @@ def create_tool_node(tools):
 
                 tool_result = await tool.ainvoke(tool_args)
 
-                print("Tool result:")
-                print(tool_result)
-
                 result_text = str(tool_result)
 
                 MAX_TOOL_RESULT = 6000
@@ -277,8 +217,6 @@ def create_tool_node(tools):
 
             except Exception as e:
 
-                print(f"Tool error: {e}")
-
                 tool_messages.append(
                     ToolMessage(
                         content=f"Tool execution failed: {str(e)}",
@@ -291,6 +229,15 @@ def create_tool_node(tools):
         }
 
     return tool_node
+
+
+def approval_node(state: AgentState):
+    pending = [
+        {"id": call["id"], "name": call["name"], "args": call["args"]}
+        for call in state["messages"][-1].tool_calls
+        if call["name"] in {"send_email", "create_calendar_event"}
+    ]
+    return {"approvals": interrupt(pending) if pending else {}}
 
 
 def should_continue(state: AgentState):
@@ -483,6 +430,41 @@ def create_conversation(name):
     return ConversationManager().create(name)
 
 
+def build_graph(llm_with_tools, tools, checkpointer, progress=None):
+    graph = StateGraph(AgentState)
+    graph.add_node("aether", create_aether_node(llm_with_tools))
+    graph.add_node("approval", approval_node)
+    graph.add_node("tools", create_tool_node(tools, progress))
+    graph.add_edge(START, "aether")
+    graph.add_conditional_edges("aether", should_continue, {"tools": "approval", END: END})
+    graph.add_edge("approval", "tools")
+    graph.add_edge("tools", "aether")
+    return graph.compile(checkpointer=checkpointer)
+
+
+async def invoke_agent(thread_id, message=None, approvals=None, progress=None):
+    """Run one turn or resume a paused write operation."""
+    tools = await client.get_tools()
+    llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0,
+                   api_key=os.getenv("GROQ_API_KEY"))
+    async with AsyncSqliteSaver.from_conn_string("checkpoints.db") as checkpointer:
+        app = build_graph(llm.bind_tools(tools), tools, checkpointer, progress)
+        config = {"configurable": {"thread_id": thread_id}}
+        if approvals is not None:
+            return await app.ainvoke(Command(resume=approvals), config=config)
+        human = HumanMessage(content=message, additional_kwargs={
+            "aether_time": datetime.now(ZoneInfo("Asia/Karachi")).strftime("%I:%M %p")
+        })
+        return await app.ainvoke({"messages": [human]}, config=config)
+
+
+async def conversation_state(thread_id):
+    async with AsyncSqliteSaver.from_conn_string("checkpoints.db") as checkpointer:
+        # History loading does not require live MCP servers or an LLM.
+        app = build_graph(None, [], checkpointer)
+        return await app.aget_state({"configurable": {"thread_id": thread_id}})
+
+
 
 
 async def main():
@@ -514,34 +496,8 @@ async def main():
     # LANGGRAPH
     # --------------------------------------------------
 
-    graph = StateGraph(AgentState)
-
-    graph.add_node(
-        "aether",
-        create_aether_node(llm_with_tools)
-    )
-
-    graph.add_node(
-        "tools",
-        create_tool_node(tools)
-    )
-
-    graph.add_edge(START, "aether")
-
-    graph.add_conditional_edges(
-        "aether",
-        should_continue,
-        {
-            "tools": "tools",
-            END: END,
-        },
-    )
-
-    graph.add_edge("tools", "aether")
-
     async with AsyncSqliteSaver.from_conn_string("checkpoints.db") as checkpointer:
-
-        app = graph.compile(checkpointer=checkpointer)
+        app = build_graph(llm_with_tools, tools, checkpointer)
 
         # --------------------------------------------------
         # USER INPUT
@@ -595,6 +551,14 @@ async def main():
                 },
                 config=config
             )
+
+            while "__interrupt__" in result:
+                pending = result["__interrupt__"][0].value
+                approvals = {}
+                for action in pending:
+                    print(f"\nConfirm {action['name']}: {action['args']}")
+                    approvals[action["id"]] = input("Proceed? (yes/no): ").strip().lower() == "yes"
+                result = await app.ainvoke(Command(resume=approvals), config=config)
 
             print("\nAssistant:")
             print(result["messages"][-1].content)
