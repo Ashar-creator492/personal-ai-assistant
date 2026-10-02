@@ -220,6 +220,8 @@ section[data-testid="stSidebar"] :is(.st-key-active-conversation,[class*="st-key
 .st-key-services-footer [data-testid="stPopoverButton"]::before { content:'A'; display:inline-grid; place-items:center; width:28px; height:28px; margin-right:8px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-weight:600; }
 .st-key-services-footer [data-testid="stPopoverButton"] [data-testid="stIconMaterial"] { display:none; }
 [data-testid="stPopoverBody"] [data-testid="stToggle"] [data-baseweb="toggle"] { border:1px solid var(--accent) !important; }
+[data-testid="stToggle"] [role="switch"] { border:1px solid var(--muted) !important; background:var(--border) !important; }
+[data-testid="stToggle"] [role="switch"][aria-checked="true"] { border-color:var(--accent) !important; background:var(--accent) !important; }
 
 [data-testid="stChatMessage"] { padding:0 !important; margin:0 0 22px !important; min-height:0 !important; }
 [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { width:100%; display:flex !important; justify-content:flex-end !important; align-items:flex-start; }
