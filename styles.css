@@ -229,6 +229,9 @@ section[data-testid="stSidebar"] :is(.st-key-active-conversation,[class*="st-key
 [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) [data-testid="stChatMessageContent"] > div { width:auto !important; }
 [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) .message-time { position:static; text-align:right; margin:3px 0 0; }
 [data-testid="stChatMessage"] p { font-size:15px; line-height:1.6; }
+[data-testid="stChatMessageContent"] [data-testid="stMarkdownContainer"] table { color:var(--text) !important; }
+[data-testid="stChatMessageContent"] [data-testid="stMarkdownContainer"] th,
+[data-testid="stChatMessageContent"] [data-testid="stMarkdownContainer"] td { color:var(--text) !important; border-color:var(--border) !important; }
 [data-testid="stChatMessageAvatarAssistant"] { display:grid; place-items:center; width:28px !important; height:28px !important; flex:none; border-radius:7px; background:var(--accent-soft) !important; margin:0; }
 [data-testid="stChatMessageAvatarAssistant"] img { width:21px; height:21px; }
 [data-testid="stChatMessage"] iframe { visibility:hidden; opacity:0 !important; }
