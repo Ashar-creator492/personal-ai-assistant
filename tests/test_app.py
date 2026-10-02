@@ -66,6 +66,10 @@ class AppTests(unittest.TestCase):
                     AIMessage(content="", tool_calls=[{"id": "send-1", "name": "send_email", "args": {}}]),
                     ToolMessage(content='{"status":"email_sent"}', tool_call_id="send-1"),
                     AIMessage(content="Done"),
+                    AIMessage(content="", tool_calls=[{"id": "event-1", "name": "create_calendar_event",
+                                                       "args": {"title": "Test"}}]),
+                    ToolMessage(content="The user cancelled this action. Do not perform it.", tool_call_id="event-1"),
+                    AIMessage(content="Cancelled."),
                 ]}, tasks=[])
 
             with patch("src.assistant.conversations.ConversationManager", return_value=manager), \
@@ -81,6 +85,8 @@ class AppTests(unittest.TestCase):
                 self.assertIn("Email sent", output)
                 self.assertIn("Used Gmail", output)
                 self.assertIn("Used Weather", output)
+                self.assertEqual(output.count("Cancelled"), 1)
+                self.assertNotIn("Used Calendar", output)
                 self.assertNotIn("Response ready", output)
                 self.assertNotIn("Here is the weather", output)
                 self.assertNotIn("Here is your mail", output)

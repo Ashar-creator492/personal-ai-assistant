@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_core.messages import (
+    AIMessage,
     ToolMessage,
     SystemMessage,
     HumanMessage,
@@ -125,14 +126,38 @@ context.
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     approvals: dict
-    
+
+
+def calendar_args_in_local_time(args):
+    """Calendar tool times are local wall times, even if the model adds another offset."""
+    local_args = dict(args)
+    for field in ("start_time", "end_time"):
+        value = local_args.get(field)
+        if not value:
+            continue
+        try:
+            local_time = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        local_args[field] = local_time.replace(tzinfo=ZoneInfo("Asia/Karachi")).isoformat()
+    return local_args
+
 
 def create_aether_node(llm_with_tools):
 
     async def aether_node(state: AgentState):
 
+        tool_results = []
+        for message in reversed(state["messages"]):
+            if not isinstance(message, ToolMessage):
+                break
+            tool_results.append(message)
+        if tool_results and all(message.content.startswith("The user cancelled this action.")
+                                for message in tool_results):
+            return {"messages": [AIMessage(content="Cancelled.")]}
+
         response = await llm_with_tools.ainvoke(
-            state["messages"]
+            [SystemMessage(content=SYSTEM_PROMPT), *state["messages"]]
         )
         response.additional_kwargs["aether_time"] = datetime.now(ZoneInfo("Asia/Karachi")).strftime("%I:%M %p")
 
@@ -154,9 +179,8 @@ def create_tool_node(tools, progress=None):
         for tool_call in last_message.tool_calls:
 
             tool_name = tool_call["name"]
-            tool_args = tool_call["args"]
-            if progress:
-                progress(tool_name)
+            tool_args = (calendar_args_in_local_time(tool_call["args"])
+                         if tool_name == "create_calendar_event" else tool_call["args"])
 
             if tool_name in {"send_email", "create_calendar_event"} and not state.get("approvals", {}).get(tool_call["id"]):
                 tool_messages.append(ToolMessage(
@@ -164,6 +188,9 @@ def create_tool_node(tools, progress=None):
                     tool_call_id=tool_call["id"],
                 ))
                 continue
+
+            if progress:
+                progress(tool_name)
 
             # --------------------------------------------------
             # FIND MCP TOOL
@@ -233,7 +260,9 @@ def create_tool_node(tools, progress=None):
 
 def approval_node(state: AgentState):
     pending = [
-        {"id": call["id"], "name": call["name"], "args": call["args"]}
+        {"id": call["id"], "name": call["name"],
+         "args": calendar_args_in_local_time(call["args"])
+         if call["name"] == "create_calendar_event" else call["args"]}
         for call in state["messages"][-1].tool_calls
         if call["name"] in {"send_email", "create_calendar_event"}
     ]
@@ -280,7 +309,8 @@ async def run_agent(question, llm_with_tools, tools):
         for tool_call in response.tool_calls:
 
             tool_name = tool_call["name"]
-            tool_args = tool_call["args"]
+            tool_args = (calendar_args_in_local_time(tool_call["args"])
+                         if tool_name == "create_calendar_event" else tool_call["args"])
 
             print(f"\nUsing tool: {tool_name}")
             print(f"Arguments: {tool_args}")

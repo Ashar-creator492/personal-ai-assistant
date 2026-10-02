@@ -346,13 +346,14 @@ def message_list(messages):
         if isinstance(message, ToolMessage):
             kind = tool_names.get(message.tool_call_id)
             data = parse_payload(message.content)
+            cancelled = kind in {"send_email", "create_calendar_event"} and "cancelled" in str(message.content).lower()
             if kind and data is not None:
                 results.append((kind, data))
             service = service_for_tool(kind)
-            if service and service not in used_services:
+            if service and not cancelled and service not in used_services:
                 used_services.append(service)
             if kind in {"send_email", "create_calendar_event"}:
-                if "cancelled" in str(message.content).lower():
+                if cancelled:
                     action_records.append("Cancelled")
                 elif kind == "send_email":
                     action_records.append("Confirmed: Email sent" if isinstance(data, dict) and data.get("status") == "email_sent"
@@ -379,7 +380,7 @@ def message_list(messages):
                 for kind, data in results:
                     rendered_result = render_structured(kind, data) or rendered_result
                 results.clear()
-            if message.content and not rendered_result:
+            if message.content and not rendered_result and not (action_records and message.content == "Cancelled."):
                 render_content(message.content, remove_emoji=role == "assistant")
             if role == "assistant":
                 for record in action_records:
