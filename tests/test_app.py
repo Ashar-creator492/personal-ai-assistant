@@ -10,9 +10,18 @@ from streamlit.testing.v1 import AppTest
 from langchain_core.messages import AIMessage, ToolMessage
 
 from src.assistant.conversations import ConversationManager
+from app import event_parts, local_datetime, service_for_tool
 
 
 class AppTests(unittest.TestCase):
+    def test_display_dates_and_tool_labels(self):
+        self.assertEqual(local_datetime("Fri, 2 Oct 2026 02:08:04 +0000 (UTC)").strftime("%I:%M %p"), "07:08 AM")
+        self.assertEqual(event_parts("2026-10-03T01:00:00Z", "2026-10-03T03:00:00Z"),
+                         ("Sat", "3", "Oct", "6:00 AM to 8:00 AM"))
+        self.assertEqual(service_for_tool("get_recent_emails"), "Gmail")
+        self.assertEqual(service_for_tool("get_weather"), "Weather")
+        self.assertIsNone(service_for_tool(None))
+
     def test_sidebar_groups_and_search(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = ConversationManager(Path(directory) / "conversations.json")
@@ -70,6 +79,9 @@ class AppTests(unittest.TestCase):
                 self.assertIn("Alice", output)
                 self.assertIn("Lahore", output)
                 self.assertIn("Email sent", output)
+                self.assertIn("Used Gmail", output)
+                self.assertIn("Used Weather", output)
+                self.assertNotIn("Response ready", output)
                 self.assertNotIn("Here is the weather", output)
                 self.assertNotIn("Here is your mail", output)
                 self.assertNotIn('{"city"', output)
@@ -86,12 +98,16 @@ class AppTests(unittest.TestCase):
 
             async def invoke(thread_id, message=None, approvals=None, progress=None):
                 calls.append((thread_id, message, approvals))
+                if progress:
+                    progress("get_recent_emails")
 
             with patch("src.assistant.conversations.ConversationManager", return_value=manager), \
                  patch("src.assistant.agent.conversation_state", state), \
                  patch("src.assistant.agent.invoke_agent", invoke):
                 app = AppTest.from_file(str(Path(__file__).parents[1] / "app.py")).run(timeout=15)
                 self.assertFalse(app.exception)
+                app.button(key="starter-Email").click().run(timeout=15)
+                self.assertEqual(calls, [])
                 app.button(key=f"select-{existing}").click().run(timeout=15)
                 self.assertEqual(app.session_state["active_conversation"], "Existing")
 

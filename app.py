@@ -6,6 +6,7 @@ import base64
 import json
 import re
 from datetime import datetime, timedelta
+from email.utils import parseaddr, parsedate_to_datetime
 from html import escape
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -91,61 +92,66 @@ def sidebar(manager, conversations, snapshots):
             st.rerun()
         query = st.text_input("Search conversations", placeholder="Search conversations",
                               label_visibility="collapsed", key="conversation_search").casefold().strip()
-        st.markdown('<div class="sidebar-label">CONVERSATIONS</div>', unsafe_allow_html=True)
-        for group in ("Today", "Yesterday", "Earlier"):
-            items = [(name, thread_id) for name, thread_id in conversations.items()
-                     if query in name.casefold() and group_for(snapshots[name], name) == group]
-            if not items:
-                continue
-            st.markdown(f'<div class="conversation-group">{group}</div>', unsafe_allow_html=True)
-            for name, thread_id in items:
-                active = name == st.session_state.active_conversation
-                with st.container(key="active-conversation" if active else f"conversation-{thread_id}"):
-                    row, time_col, menu = st.columns([5, 1.1, .7], gap=None, vertical_alignment="center")
-                    with row:
-                        if st.button(name, key=f"select-{thread_id}", icon=":material/chat_bubble_outline:",
-                                     use_container_width=True):
-                            st.session_state.active_conversation = name
-                            st.rerun()
-                    with time_col:
-                        st.markdown(f'<span class="row-time">{relative_time(snapshots[name])}</span>',
-                                    unsafe_allow_html=True)
-                    with menu:
-                        with st.popover("...", key=f"menu-{thread_id}"):
-                            with st.form(f"rename-{thread_id}"):
-                                new_name = st.text_input("Rename", value=name)
-                                if st.form_submit_button("Save", use_container_width=True):
-                                    try:
-                                        manager.rename(name, new_name)
-                                    except ValueError as error:
-                                        st.error(str(error))
-                                    else:
-                                        if active:
-                                            st.session_state.active_conversation = new_name.strip()
-                                        st.rerun()
-                            if st.button("Delete conversation", key=f"delete-{thread_id}"):
-                                st.session_state.delete_target = name
-                            if st.session_state.get("delete_target") == name:
-                                st.warning("Remove this conversation from the list? Saved checkpoint data remains.")
-                                if st.button("Confirm delete", key=f"confirm-delete-{thread_id}", type="secondary"):
-                                    manager.delete(name)
-                                    st.session_state.delete_target = None
-                                    if active:
-                                        st.session_state.active_conversation = next(iter(manager.list()), None)
-                                    st.rerun()
-                                if st.button("Cancel", key=f"cancel-delete-{thread_id}"):
-                                    st.session_state.delete_target = None
-                                    st.rerun()
+        with st.container(key="conversation-list"):
+            st.markdown('<div class="sidebar-label">CONVERSATIONS</div>', unsafe_allow_html=True)
+            for group in ("Today", "Yesterday", "Earlier"):
+              items = [(name, thread_id) for name, thread_id in conversations.items()
+                       if query in name.casefold() and group_for(snapshots[name], name) == group]
+              if not items:
+                  continue
+              st.markdown(f'<div class="conversation-group">{group}</div>', unsafe_allow_html=True)
+              for name, thread_id in items:
+                  active = name == st.session_state.active_conversation
+                  with st.container(key="active-conversation" if active else f"conversation-{thread_id}"):
+                      row, time_col, menu = st.columns([5, 1.1, .7], gap=None, vertical_alignment="center")
+                      with row:
+                          if st.button(name, key=f"select-{thread_id}", icon=":material/chat_bubble_outline:",
+                                       use_container_width=True):
+                              st.session_state.active_conversation = name
+                              st.rerun()
+                      with time_col:
+                          st.markdown(f'<span class="row-time">{relative_time(snapshots[name])}</span>',
+                                      unsafe_allow_html=True)
+                      with menu:
+                          with st.popover("...", key=f"menu-{thread_id}"):
+                              with st.form(f"rename-{thread_id}"):
+                                  new_name = st.text_input("Rename", value=name)
+                                  if st.form_submit_button("Save", use_container_width=True):
+                                      try:
+                                          manager.rename(name, new_name)
+                                      except ValueError as error:
+                                          st.error(str(error))
+                                      else:
+                                          if active:
+                                              st.session_state.active_conversation = new_name.strip()
+                                          st.rerun()
+                              if st.button("Delete conversation", key=f"delete-{thread_id}"):
+                                  st.session_state.delete_target = name
+                              if st.session_state.get("delete_target") == name:
+                                  st.warning("Remove this conversation from the list? Saved checkpoint data remains.")
+                                  if st.button("Confirm delete", key=f"confirm-delete-{thread_id}", type="secondary"):
+                                      manager.delete(name)
+                                      st.session_state.delete_target = None
+                                      if active:
+                                          st.session_state.active_conversation = next(iter(manager.list()), None)
+                                      st.rerun()
+                                  if st.button("Cancel", key=f"cancel-delete-{thread_id}"):
+                                      st.session_state.delete_target = None
+                                      st.rerun()
         with st.container(key="services-footer"):
-            st.markdown('<div class="connected-services"><span class="dot"></span> Gmail'
-                        '<span class="dot"></span> Calendar<span class="dot"></span> Weather</div>',
-                        unsafe_allow_html=True)
-            st.toggle("Dark mode", key="dark_mode")
+            with st.popover("Account", icon=":material/account_circle:"):
+                st.toggle("Dark mode", key="dark_mode")
+                st.markdown('<div class="connected-services"><span class="dot"></span> Gmail'
+                            '<span class="dot"></span> Calendar<span class="dot"></span> Weather</div>',
+                            unsafe_allow_html=True)
 
 
 def header(name):
     st.markdown(f'<div class="chat-header"><h1 class="conversation-title" title="{safe(name)}">'
-                f'{safe(name)}</h1><span class="service-label">Gmail · Calendar · Weather</span></div>',
+                f'{safe(name)}</h1><span class="header-services">'
+                '<span class="status-chip"><i></i>Gmail</span><span class="status-chip"><i></i>Calendar</span>'
+                '<span class="status-chip"><i></i>Weather</span><span class="status-chip groq-chip">Groq</span>'
+                '</span></div>',
                 unsafe_allow_html=True)
 
 
@@ -185,17 +191,49 @@ def parse_payload(content):
     return data
 
 
-def event_parts(start, end=""):
+def local_datetime(value):
+    if not value:
+        return None
     try:
-        when = datetime.fromisoformat(start)
-        day = when.strftime("%d")
-        month = when.strftime("%b")
-        time = when.strftime("%-I:%M %p") if "T" in start else "All day"
-        if end:
-            time += " – " + datetime.fromisoformat(end).strftime("%-I:%M %p")
-        return day, month, time
-    except (ValueError, TypeError):
-        return "—", "", start or "Time unavailable"
+        when = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        try:
+            when = parsedate_to_datetime(str(value).replace(" (UTC)", ""))
+        except (TypeError, ValueError, IndexError):
+            return None
+    return (when if when.tzinfo else when.replace(tzinfo=LOCAL_TIME)).astimezone(LOCAL_TIME)
+
+
+def short_time(when):
+    return when.strftime("%I:%M %p").lstrip("0")
+
+
+def email_date(value):
+    when = local_datetime(value)
+    if not when:
+        return clean(value)
+    days = (datetime.now(LOCAL_TIME).date() - when.date()).days
+    if days == 0:
+        return f"Today, {short_time(when)}"
+    if days == 1:
+        return f"Yesterday, {short_time(when)}"
+    return when.strftime("%a %-d %b")
+
+
+def event_parts(start, end=""):
+    when = local_datetime(start)
+    if not when:
+        return "—", "", "", clean(start or "Time unavailable")
+    finish = local_datetime(end)
+    time = short_time(when) + (f" to {short_time(finish)}" if finish else "") if "T" in str(start) else "All day"
+    return when.strftime("%a"), when.strftime("%-d"), when.strftime("%b"), time
+
+
+def result_card(service, icon, body, detail=""):
+    st.markdown(f'<div class="result-card"><div class="result-header"><span class="service-tile '
+                f'{service.lower()}-tile material-symbols-outlined">{icon}</span>'
+                f'<span>{service}{(" · " + clean(detail)) if detail else ""}</span></div>{body}</div>',
+                unsafe_allow_html=True)
 
 
 def render_structured(kind, data):
@@ -204,13 +242,16 @@ def render_structured(kind, data):
         for item in data if isinstance(data, list) else [data]:
             if isinstance(item, dict) and "subject" in item:
                 sender = str(item.get("from", ""))
-                initial = next((character.upper() for character in sender if character.isalpha()), "?")
+                name, address = parseaddr(sender)
+                name = name or address or sender
+                initial = next((character.upper() for character in name if character.isalpha()), "?")
                 rows.append(f'<div class="email-row"><span class="sender-tile">{clean(initial)}</span>'
                             f'<span class="result-title">{clean(item.get("subject") or "Untitled")}</span>'
-                            f'<span class="result-meta">{clean(item.get("date", ""))}</span>'
-                            f'<span class="result-meta sender-name">{clean(sender)}</span></div>')
+                            f'<span class="result-meta email-date">{email_date(item.get("date", ""))}</span>'
+                            f'<span class="result-meta sender-name" title="{safe(address)}">{clean(name)}</span></div>')
         if rows:
-            st.markdown('<div class="result-list">' + "".join(rows) + "</div>", unsafe_allow_html=True)
+            result_card("Gmail", "mail", '<div class="result-list">' + "".join(rows) + "</div>",
+                        f'{len(rows)} email{"s" if len(rows) != 1 else ""}')
             return True
     if kind in {"get_upcoming_events", "find_upcoming_events", "create_calendar_event"}:
         events = data.get("events", []) if isinstance(data, dict) and "events" in data else data
@@ -220,28 +261,40 @@ def render_structured(kind, data):
             if not isinstance(event, dict) or "title" not in event:
                 continue
             start = event.get("start") or event.get("start_time") or event.get("date", "")
-            day, month, time = event_parts(start, event.get("end") or event.get("end_time", ""))
-            rows.append(f'<div class="event-row"><span class="event-date">{clean(day)}<small>{clean(month)}</small></span>'
-                        f'<span><span class="result-title">{clean(event["title"])}</span>'
-                        f'<br><span class="result-meta">{clean(time)}</span></span></div>')
+            weekday, day, month, time = event_parts(start, event.get("end") or event.get("end_time", ""))
+            location = event.get("location")
+            location_html = f'<span class="result-meta">{clean(location)}</span>' if location else ""
+            success = ('<span class="success-chip"><span class="material-symbols-outlined">check</span>'
+                       'Event created</span>') if kind == "create_calendar_event" else ""
+            zone_label = " PKT" if time != "All day" else ""
+            rows.append(f'<div class="event-row"><span class="event-date"><small>{clean(weekday)}</small>'
+                        f'{clean(day)}<small>{clean(month)}</small></span>'
+                        f'<span class="event-info"><span class="result-title">{clean(event["title"])}</span>'
+                        f'<span class="result-meta">{clean(time)}{zone_label}</span>{location_html}</span>{success}</div>')
         if rows:
-            st.markdown('<div class="result-list">' + "".join(rows) + "</div>", unsafe_allow_html=True)
+            result_card("Calendar", "calendar_month", '<div class="result-list">' + "".join(rows) + "</div>")
             return True
     if kind == "get_weather" and isinstance(data, dict) and "temperature" in data:
-        details = [f'{clean(data.get("city", ""))}', f'<strong>{clean(data["temperature"])}°C</strong>']
+        details = []
         if "humidity" in data:
             details.append(f'{clean(data["humidity"])}% humidity')
         if "wind_speed" in data:
             details.append(f'{clean(data["wind_speed"])} km/h wind')
-        st.markdown('<div class="weather-row"><span class="service-tile weather-tile material-symbols-outlined">partly_cloudy_day</span>'
-                    + "<span>·</span>".join(details) + '</div>', unsafe_allow_html=True)
+        for field, label in (("feels_like", "Feels like"), ("max_temperature", "High"), ("min_temperature", "Low")):
+            if data.get(field) is not None:
+                details.append(f'{label} {clean(data[field])}°C')
+        condition = data.get("condition") or data.get("description") or "Current conditions"
+        body = f'<div class="weather-row"><div class="weather-main"><span class="weather-city">{clean(data.get("city", ""))}</span>' \
+               f'<strong>{clean(data["temperature"])}°C</strong><span>{clean(condition)}</span></div>' \
+               f'<div class="weather-details">{" · ".join(details)}</div></div>'
+        result_card("Weather", "partly_cloudy_day", body, data.get("city", ""))
         return True
     if kind == "get_forecast" and isinstance(data, dict) and "dates" in data:
         rows = []
         for day, high, low in zip(data["dates"], data["max_temperature"], data["min_temperature"]):
             rows.append(f'<div class="weather-row">{clean(day)} <strong>{clean(high)}°C</strong>'
                         f'<span class="result-meta">Low {clean(low)}°C</span></div>')
-        st.markdown('<div class="result-list">' + "".join(rows) + '</div>', unsafe_allow_html=True)
+        result_card("Weather", "partly_cloudy_day", '<div class="result-list">' + "".join(rows) + '</div>')
         return True
     return False
 
@@ -266,29 +319,50 @@ def render_content(content, remove_emoji=True):
     st.markdown(readable(data) or "No results")
 
 
+def service_for_tool(name):
+    if not name:
+        return None
+    if any(part in name for part in ("email", "contact", "draft")):
+        return "Gmail"
+    if any(part in name for part in ("calendar", "event")):
+        return "Calendar"
+    if any(part in name for part in ("weather", "forecast")):
+        return "Weather"
+    return None
+
+
 def message_list(messages):
     visible = False
     tool_names = {}
+    tool_args = {}
     results = []
     action_records = []
+    used_services = []
     for message in messages:
         if isinstance(message, AIMessage) and message.tool_calls:
             tool_names.update({call["id"]: call["name"] for call in message.tool_calls})
+            tool_args.update({call["id"]: call.get("args", {}) for call in message.tool_calls})
             continue
         if isinstance(message, ToolMessage):
             kind = tool_names.get(message.tool_call_id)
             data = parse_payload(message.content)
             if kind and data is not None:
                 results.append((kind, data))
+            service = service_for_tool(kind)
+            if service and service not in used_services:
+                used_services.append(service)
             if kind in {"send_email", "create_calendar_event"}:
                 if "cancelled" in str(message.content).lower():
-                    action_records.append("Email cancelled" if kind == "send_email" else "Event cancelled")
+                    action_records.append("Cancelled")
                 elif kind == "send_email":
-                    action_records.append("Email sent" if isinstance(data, dict) and data.get("status") == "email_sent"
+                    action_records.append("Confirmed: Email sent" if isinstance(data, dict) and data.get("status") == "email_sent"
                                           else "Email request finished")
                 else:
-                    action_records.append("Event created" if isinstance(data, dict) and data.get("id")
-                                          else "Event request finished")
+                    event = tool_args.get(message.tool_call_id, {})
+                    when = local_datetime(event.get("start_time"))
+                    detail = f', {when.strftime("%a %-d %b")}' if when else ""
+                    action_records.append(f'Confirmed: {event.get("title", "Event")}{detail}'
+                                          if isinstance(data, dict) and data.get("id") else "Event request finished")
             continue
         if not isinstance(message, (HumanMessage, AIMessage)) or not message.content:
             continue
@@ -298,6 +372,10 @@ def message_list(messages):
         with st.chat_message(role, avatar=str(logo) if role == "assistant" else None):
             rendered_result = False
             if role == "assistant":
+                if used_services:
+                    st.markdown(f'<div class="activity-summary"><span class="material-symbols-outlined">check</span>'
+                                f'Used {safe(" · ".join(used_services))}</div>', unsafe_allow_html=True)
+                    used_services.clear()
                 for kind, data in results:
                     rendered_result = render_structured(kind, data) or rendered_result
                 results.clear()
@@ -305,15 +383,13 @@ def message_list(messages):
                 render_content(message.content, remove_emoji=role == "assistant")
             if role == "assistant":
                 for record in action_records:
-                    st.markdown(f'<div class="action-result">✓ {safe(record)}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="action-result">{safe(record)}</div>', unsafe_allow_html=True)
                 action_records.clear()
             if message.additional_kwargs.get("aether_time"):
                 st.markdown(f'<div class="message-time">{safe(message.additional_kwargs["aether_time"])}</div>',
                             unsafe_allow_html=True)
             if role == "assistant":
                 copy_control(strip_emojis(str(message.content)))
-    for record in action_records:
-        st.markdown(f'<div class="action-result">✓ {safe(record)}</div>', unsafe_allow_html=True)
     return visible
 
 
@@ -375,45 +451,52 @@ def confirmation_card(actions):
     decisions = st.session_state.setdefault(decision_key, {})
     for action in actions:
         action_id, kind, args = action["id"], action["name"], action["args"]
-        with st.container(border=True, key=f"approval-{action_id}"):
-            st.markdown('<div class="approval-heading">' + ("Send email" if kind == "send_email" else "Create calendar event")
-                        + '</div>', unsafe_allow_html=True)
-            if kind == "send_email":
-                st.write(f"To: {args.get('to', '')}")
-                st.write(f"Subject: {args.get('subject', '')}")
-                st.write(args.get("body", ""))
-            else:
-                st.write(f"Title: {args.get('title', '')}")
-                st.write(f"Start: {args.get('start_time', '')}")
-                st.write(f"End: {args.get('end_time', '')}")
-                try:
-                    duration = datetime.fromisoformat(args["end_time"]) - datetime.fromisoformat(args["start_time"])
-                    st.write(f"Duration: {duration}")
-                except (KeyError, ValueError):
-                    pass
-                if args.get("location"):
-                    st.write(f"Location: {args['location']}")
-            if action_id in decisions:
-                st.caption("Approved" if decisions[action_id] else "Cancelled")
-            else:
-                confirm, cancel = st.columns(2)
-                if confirm.button("Confirm", key=f"approve-{action_id}", type="primary"):
-                    decisions[action_id] = True
-                    st.rerun()
-                if cancel.button("Cancel", key=f"reject-{action_id}"):
-                    decisions[action_id] = False
-                    st.rerun()
+        logo = ROOT / "assets" / ("logo_dark.svg" if st.session_state.get("dark_mode") else "logo.svg")
+        with st.chat_message("assistant", avatar=str(logo)):
+            with st.container(border=True, key=f"approval-{action_id}"):
+                heading = "Send email" if kind == "send_email" else "Create calendar event"
+                st.markdown(f'<div class="approval-heading">{heading}</div>', unsafe_allow_html=True)
+                fields = [("To", args.get("to")), ("Subject", args.get("subject"))] if kind == "send_email" else [
+                    ("Title", args.get("title"))]
+                if kind == "create_calendar_event":
+                    start, end = local_datetime(args.get("start_time")), local_datetime(args.get("end_time"))
+                    if start:
+                        value = f'{start.strftime("%a, %-d %b")} · {short_time(start)}'
+                        if end:
+                            value += f' to {short_time(end)}'
+                        fields.append(("When", value + " PKT"))
+                        if end:
+                            minutes = round((end - start).total_seconds() / 60)
+                            duration = f'{minutes // 60} hour{"s" if minutes // 60 != 1 else ""}' if minutes % 60 == 0 else f'{minutes} minutes'
+                            fields.append(("Duration", duration))
+                    fields.append(("Location", args.get("location")))
+                details = "".join(f'<div class="approval-label">{safe(label)}</div><div class="approval-value">{clean(value)}</div>'
+                                  for label, value in fields if value)
+                if details:
+                    st.markdown(f'<div class="approval-details">{details}</div>', unsafe_allow_html=True)
+                if kind == "send_email" and args.get("body"):
+                    st.markdown(f'<blockquote class="approval-body">{clean(args["body"])}</blockquote>',
+                                unsafe_allow_html=True)
+                if action_id in decisions:
+                    st.markdown('<div class="action-result">' + ("Confirmed" if decisions[action_id] else "Cancelled")
+                                + '</div>', unsafe_allow_html=True)
+                else:
+                    _, confirm, cancel = st.columns([4, 1, 1], gap="small")
+                    if confirm.button("Confirm", key=f"approve-{action_id}", type="primary"):
+                        decisions[action_id] = True
+                        st.rerun()
+                    if cancel.button("Cancel", key=f"reject-{action_id}"):
+                        decisions[action_id] = False
+                        st.rerun()
     if all(action["id"] in decisions for action in actions):
         activity = []
-        with st.status("Completing request...", expanded=True) as status:
-            try:
-                asyncio.run(invoke_agent(st.session_state.thread_id, approvals=decisions,
-                                         progress=lambda name: update_activity(status, name, activity)))
-            except Exception as error:
-                status.update(state="error", expanded=False)
-                st.error(f"Could not complete the request: {error}")
-                return
-            status.update(label="Request finished", state="complete", expanded=False)
+        status_slot = st.empty()
+        try:
+            asyncio.run(invoke_agent(st.session_state.thread_id, approvals=decisions,
+                                     progress=lambda name: update_activity(status_slot, name, activity)))
+        except Exception as error:
+            st.error(f"Could not complete the request: {error}")
+            return
         st.session_state[decision_key] = {}
         st.rerun()
 
@@ -440,44 +523,26 @@ def send_message(thread_id, prompt, first_turn=False, activity_slot=None):
         st.session_state.active_conversation = title
     activity = []
     with (activity_slot.container() if activity_slot else st.container()):
-        with st.status("Aether is working...", expanded=True) as status:
-            try:
-                result = asyncio.run(invoke_agent(thread_id, message=prompt,
-                                                  progress=lambda name: update_activity(status, name, activity)))
-            except Exception as error:
-                status.update(state="error", expanded=False)
-                st.error(f"Could not reach Aether services: {error}")
-                return
-            if isinstance(result, dict) and "__interrupt__" in result:
-                status.update(label="Awaiting confirmation", state="complete", expanded=False)
-                st.session_state.setdefault("activity_summaries", {}).pop(thread_id, None)
-            else:
-                summary = " · ".join(activity) if activity else "Response ready"
-                status.update(label=f"Completed · {summary}", state="complete", expanded=False)
-                st.session_state.setdefault("activity_summaries", {})[thread_id] = f"✓ {summary}"
+        status_slot = st.empty()
+        try:
+            asyncio.run(invoke_agent(thread_id, message=prompt,
+                                     progress=lambda name: update_activity(status_slot, name, activity)))
+        except Exception as error:
+            st.error(f"Could not reach Aether services: {error}")
+            return
     st.rerun()
 
 
-def update_activity(status, tool_name, activity):
-    if "email" in tool_name or "contact" in tool_name or "draft" in tool_name:
-        service = "Gmail"
-    elif "calendar" in tool_name or "event" in tool_name:
-        service = "Calendar"
-    elif "weather" in tool_name or "forecast" in tool_name:
-        service = "Weather"
-    else:
+def update_activity(status_slot, tool_name, activity):
+    service = service_for_tool(tool_name)
+    if not service:
         return
     if service not in activity:
         activity.append(service)
-        icon = {"Gmail": "mail", "Calendar": "calendar_month", "Weather": "partly_cloudy_day"}[service]
-        detail = ("sending email" if tool_name == "send_email" else
-                  "drafting email" if "draft" in tool_name else
-                  "searching inbox" if service == "Gmail" else
-                  "creating event" if tool_name == "create_calendar_event" else
-                  "checking events" if service == "Calendar" else "checking conditions")
-        status.markdown(f'<div class="tool-activity"><span class="service-tile {service.lower()}-tile '
-                        f'material-symbols-outlined">{icon}</span>{service}: {detail}</div>', unsafe_allow_html=True)
-    status.update(label=f"Working with {service}...")
+    label = {"Gmail": "Checking Gmail...", "Calendar": "Checking calendar...",
+             "Weather": "Getting weather..."}[service]
+    if status_slot:
+        status_slot.status(label, expanded=False)
 
 
 def main():
@@ -488,6 +553,18 @@ def main():
         st.session_state.active_conversation = next(iter(conversations), None)
     snapshots = {name: asyncio.run(conversation_state(thread_id))
                  for name, thread_id in conversations.items()}
+    for name, thread_id in list(conversations.items()):
+        if not re.fullmatch(r"New conversation(?: \d+)?", name):
+            continue
+        first = next((item.content for item in snapshots[name].values.get("messages", [])
+                      if isinstance(item, HumanMessage) and isinstance(item.content, str)), None)
+        if first:
+            title = title_from_prompt(first, conversations)
+            manager.rename(name, title)
+            conversations[title] = conversations.pop(name)
+            snapshots[title] = snapshots.pop(name)
+            if st.session_state.active_conversation == name:
+                st.session_state.active_conversation = title
     sidebar(manager, conversations, snapshots)
     if not st.session_state.active_conversation:
         st.markdown('<div class="empty-title">Aether</div>', unsafe_allow_html=True)
@@ -502,9 +579,6 @@ def main():
         header(name)
         messages = snapshot.values.get("messages", [])
         has_messages = message_list(messages)
-        if st.session_state.get("activity_summaries", {}).get(thread_id):
-            st.markdown(f'<div class="activity-summary">{safe(st.session_state.activity_summaries[thread_id])}</div>',
-                        unsafe_allow_html=True)
         activity_slot = st.empty()
         if actions:
             confirmation_card(actions)
@@ -512,7 +586,13 @@ def main():
             suggestion = empty_state()
             if suggestion:
                 send_message(thread_id, suggestion, first_turn=True, activity_slot=activity_slot)
-    prompt = st.chat_input("Message Aether", disabled=bool(actions))
+    with st.container(key="input-chips"):
+        for column, (label, starter) in zip(st.columns(3, gap="small"), (
+            ("Email", "Show my unread emails"), ("Calendar", "What's on my calendar this week?"),
+            ("Weather", "What's the weather in Rawalpindi?"))):
+            if column.button(label, key=f"starter-{label}", disabled=bool(actions)):
+                st.session_state.composer = starter
+    prompt = st.chat_input("Message Aether", disabled=bool(actions), key="composer")
     if prompt:
         first_turn = not any(isinstance(message, HumanMessage) for message in messages)
         send_message(thread_id, prompt, first_turn=first_turn, activity_slot=activity_slot)
