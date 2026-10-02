@@ -4,7 +4,11 @@ import asyncio
 import ast
 import base64
 import json
+import queue
 import re
+import threading
+import time
+import uuid
 from datetime import datetime, timedelta
 from email.utils import parseaddr, parsedate_to_datetime
 from html import escape
@@ -447,13 +451,130 @@ def pending_actions(snapshot):
     return []
 
 
+def phase_label(event):
+    phase = event.get("phase")
+    if phase == "thinking":
+        return "Thinking..."
+    if phase == "writing":
+        return "Writing the reply..."
+    if phase == "waiting":
+        return "Waiting for your confirmation"
+    service = service_for_tool(event.get("tool"))
+    if service == "Gmail":
+        return "Checking Gmail..."
+    if service == "Calendar":
+        return "Checking calendar..."
+    if service == "Weather":
+        city = event.get("args", {}).get("city")
+        return f"Getting weather for {city}..." if city else "Getting weather..."
+    return None
+
+
+def pending_in_history(messages, pending):
+    if pending.get("checkpoint_saved"):
+        return True
+    turn_id = pending.get("turn_id")
+    return any(isinstance(message, HumanMessage)
+               and message.additional_kwargs.get("aether_turn_id") == turn_id
+               for message in messages)
+
+
+def render_working_status(slot, label, started_at):
+    elapsed = int(time.monotonic() - started_at)
+    timer = f'<span class="working-elapsed">{elapsed}s</span>' if elapsed >= 4 else ""
+    notice = ('<div class="working-long">Still working. This is taking longer than usual.</div>'
+              if elapsed >= 20 else "")
+    text = safe(label.removesuffix("..."))
+    dots = '<span class="working-dots" aria-hidden="true"><i></i><i></i><i></i></span>' if label.endswith("...") else ""
+    slot.markdown(f'<div class="working-progress"><div class="working-line"><span class="working-spinner" '
+                  f'aria-hidden="true"></span><span>{text}</span>{dots}{timer}</div>{notice}</div>',
+                  unsafe_allow_html=True)
+
+
+def run_pending_turn(thread_id, status_slot):
+    pending = st.session_state.pending_turn
+    events = queue.Queue()
+
+    def invoke():
+        try:
+            result = asyncio.run(asyncio.wait_for(
+                invoke_agent(thread_id, message=None if pending.get("resume") else pending["prompt"],
+                             progress=events.put,
+                             turn_id=pending["turn_id"]), timeout=90))
+            events.put(("complete", result))
+        except TimeoutError:
+            events.put(("error", RuntimeError("The request timed out after 90 seconds.")))
+        except Exception as error:
+            events.put(("error", error))
+
+    worker = threading.Thread(target=invoke, daemon=True)
+    worker.start()
+    started_at = time.monotonic()
+    label = "Thinking..."
+    while True:
+        try:
+            event = events.get(timeout=.2)
+        except queue.Empty:
+            event = None
+        if isinstance(event, tuple):
+            outcome, value = event
+            break
+        if event:
+            label = phase_label(event) or label
+        render_working_status(status_slot, label, started_at)
+    worker.join(timeout=1)
+    if outcome == "error":
+        st.session_state.run_active = False
+        st.session_state.run_error = str(value)
+    else:
+        st.session_state.pending_turn = None
+        st.session_state.run_active = False
+        st.session_state.run_error = None
+    st.rerun()
+
+
+def render_pending_turn(messages):
+    pending = st.session_state.get("pending_turn")
+    if not pending:
+        return None
+    stored = pending_in_history(messages, pending)
+    if not stored:
+        with st.chat_message("user"):
+            render_content(pending["prompt"], remove_emoji=False)
+    logo = ROOT / "assets" / ("logo_dark.svg" if st.session_state.get("dark_mode") else "logo.svg")
+    with st.chat_message("assistant", avatar=str(logo)):
+        if st.session_state.get("run_error"):
+            st.markdown('<div class="run-failure">Something went wrong. Your message was not lost.</div>',
+                        unsafe_allow_html=True)
+            if st.button("Retry", key=f'retry-{pending["turn_id"]}', type="secondary"):
+                pending["resume"] = stored
+                st.session_state.run_error = None
+                st.session_state.run_active = True
+                st.rerun()
+            with st.expander("Details"):
+                st.code(st.session_state.run_error)
+            return None
+        status_slot = st.empty()
+        render_working_status(status_slot, "Thinking...", time.monotonic())
+        return status_slot
+
+
 def confirmation_card(actions):
     decision_key = f"approvals_{st.session_state.thread_id}"
     decisions = st.session_state.setdefault(decision_key, {})
+    ready = all(action["id"] in decisions for action in actions)
+    progress_slot = None
+    progress_started = time.monotonic()
     for action in actions:
         action_id, kind, args = action["id"], action["name"], action["args"]
         logo = ROOT / "assets" / ("logo_dark.svg" if st.session_state.get("dark_mode") else "logo.svg")
         with st.chat_message("assistant", avatar=str(logo)):
+            if ready:
+                progress_slot = st.empty()
+                render_working_status(progress_slot, "Thinking...", progress_started)
+            else:
+                st.markdown('<div class="waiting-status">Waiting for your confirmation</div>',
+                            unsafe_allow_html=True)
             with st.container(border=True, key=f"approval-{action_id}"):
                 heading = "Send email" if kind == "send_email" else "Create calendar event"
                 st.markdown(f'<div class="approval-heading">{heading}</div>', unsafe_allow_html=True)
@@ -489,12 +610,11 @@ def confirmation_card(actions):
                     if cancel.button("Cancel", key=f"reject-{action_id}"):
                         decisions[action_id] = False
                         st.rerun()
-    if all(action["id"] in decisions for action in actions):
-        activity = []
-        status_slot = st.empty()
+    if ready:
         try:
             asyncio.run(invoke_agent(st.session_state.thread_id, approvals=decisions,
-                                     progress=lambda name: update_activity(status_slot, name, activity)))
+                                     progress=lambda event: render_working_status(
+                                         progress_slot, phase_label(event) or "Thinking...", progress_started)))
         except Exception as error:
             st.error(f"Could not complete the request: {error}")
             return
@@ -516,34 +636,31 @@ def title_from_prompt(prompt, conversations):
     return title
 
 
-def send_message(thread_id, prompt, first_turn=False, activity_slot=None):
+def queue_message(prompt, first_turn=False):
     if first_turn and re.fullmatch(r"New conversation(?: \d+)?", st.session_state.active_conversation):
         manager = ConversationManager(ROOT / "conversations.json")
         title = title_from_prompt(prompt, manager.list())
         manager.rename(st.session_state.active_conversation, title)
         st.session_state.active_conversation = title
-    activity = []
-    with (activity_slot.container() if activity_slot else st.container()):
-        status_slot = st.empty()
-        try:
-            asyncio.run(invoke_agent(thread_id, message=prompt,
-                                     progress=lambda name: update_activity(status_slot, name, activity)))
-        except Exception as error:
-            st.error(f"Could not reach Aether services: {error}")
-            return
+    st.session_state.pending_turn = {"prompt": prompt, "turn_id": str(uuid.uuid4())}
+    st.session_state.run_active = True
+    st.session_state.run_error = None
     st.rerun()
 
 
-def update_activity(status_slot, tool_name, activity):
-    service = service_for_tool(tool_name)
-    if not service:
-        return
-    if service not in activity:
-        activity.append(service)
-    label = {"Gmail": "Checking Gmail...", "Calendar": "Checking calendar...",
-             "Weather": "Getting weather..."}[service]
-    if status_slot:
-        status_slot.status(label, expanded=False)
+def checkpoint_pending_turn(snapshot, actions):
+    if not getattr(snapshot, "next", ()) or actions:
+        return None
+    unfinished = next((message for message in reversed(snapshot.values.get("messages", []))
+                       if isinstance(message, HumanMessage)), None)
+    if not unfinished:
+        return None
+    return {
+        "prompt": str(unfinished.content),
+        "turn_id": unfinished.additional_kwargs.get("aether_turn_id") or str(uuid.uuid4()),
+        "resume": True,
+        "checkpoint_saved": True,
+    }
 
 
 def main():
@@ -576,27 +693,37 @@ def main():
     st.session_state.thread_id = thread_id
     snapshot = snapshots[name]
     actions = pending_actions(snapshot)
+    recovered = checkpoint_pending_turn(snapshot, actions)
+    if recovered and not st.session_state.get("pending_turn"):
+        st.session_state.pending_turn = recovered
+        st.session_state.run_active = True
+        st.session_state.run_error = None
     with st.container(key="chat-content"):
         header(name)
         messages = snapshot.values.get("messages", [])
         has_messages = message_list(messages)
-        activity_slot = st.empty()
+        status_slot = render_pending_turn(messages)
         if actions:
             confirmation_card(actions)
-        elif not has_messages:
+        elif not has_messages and not st.session_state.get("pending_turn"):
             suggestion = empty_state()
             if suggestion:
-                send_message(thread_id, suggestion, first_turn=True, activity_slot=activity_slot)
+                queue_message(suggestion, first_turn=True)
     with st.container(key="input-chips"):
         for column, (label, starter) in zip(st.columns(3, gap="small"), (
             ("Email", "Show my unread emails"), ("Calendar", "What's on my calendar this week?"),
             ("Weather", "What's the weather in Rawalpindi?"))):
-            if column.button(label, key=f"starter-{label}", disabled=bool(actions)):
+            if column.button(label, key=f"starter-{label}",
+                             disabled=bool(actions) or st.session_state.get("run_active", False)):
                 st.session_state.composer = starter
-    prompt = st.chat_input("Message Aether", disabled=bool(actions), key="composer")
+    run_active = st.session_state.get("run_active", False)
+    prompt = st.chat_input("Aether is working..." if run_active else "Message Aether",
+                           disabled=bool(actions) or run_active, key="composer")
     if prompt:
         first_turn = not any(isinstance(message, HumanMessage) for message in messages)
-        send_message(thread_id, prompt, first_turn=first_turn, activity_slot=activity_slot)
+        queue_message(prompt, first_turn=first_turn)
+    if run_active and status_slot is not None:
+        run_pending_turn(thread_id, status_slot)
 
 
 if __name__ == "__main__":

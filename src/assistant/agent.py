@@ -472,20 +472,46 @@ def build_graph(llm_with_tools, tools, checkpointer, progress=None):
     return graph.compile(checkpointer=checkpointer)
 
 
-async def invoke_agent(thread_id, message=None, approvals=None, progress=None):
+async def invoke_agent(thread_id, message=None, approvals=None, progress=None, turn_id=None):
     """Run one turn or resume a paused write operation."""
     tools = await client.get_tools()
     llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0,
                    api_key=os.getenv("GROQ_API_KEY"))
     async with AsyncSqliteSaver.from_conn_string("checkpoints.db") as checkpointer:
-        app = build_graph(llm.bind_tools(tools), tools, checkpointer, progress)
+        run_state = {"used_tool": False}
+
+        def tool_progress(name):
+            first_tool_event = not run_state["used_tool"]
+            run_state["used_tool"] = True
+            if progress and first_tool_event:
+                progress({"phase": "tool", "tool": name, "args": {}})
+
+        app = build_graph(llm.bind_tools(tools), tools, checkpointer, tool_progress)
         config = {"configurable": {"thread_id": thread_id}}
-        if approvals is not None:
-            return await app.ainvoke(Command(resume=approvals), config=config)
-        human = HumanMessage(content=message, additional_kwargs={
-            "aether_time": datetime.now(ZoneInfo("Asia/Karachi")).strftime("%I:%M %p")
-        })
-        return await app.ainvoke({"messages": [human]}, config=config)
+        graph_input = Command(resume=approvals) if approvals is not None else None if message is None else {
+            "messages": [HumanMessage(content=message, additional_kwargs={
+                "aether_time": datetime.now(ZoneInfo("Asia/Karachi")).strftime("%I:%M %p"),
+                "aether_turn_id": turn_id,
+            })]
+        }
+        if progress:
+            progress({"phase": "thinking"})
+        async for update in app.astream(graph_input, config=config, stream_mode="updates"):
+            for node, values in update.items():
+                if node == "aether":
+                    messages = values.get("messages", []) if isinstance(values, dict) else []
+                    response = messages[-1] if messages else None
+                    for call in getattr(response, "tool_calls", []):
+                        run_state["used_tool"] = True
+                        if progress:
+                            progress({"phase": "tool", "tool": call["name"],
+                                      "args": call.get("args", {})})
+                elif node == "tools" and run_state["used_tool"] and progress:
+                    progress({"phase": "writing"})
+        snapshot = await app.aget_state(config)
+        if snapshot.tasks and progress:
+            progress({"phase": "waiting"})
+        return snapshot.values
 
 
 async def conversation_state(thread_id):

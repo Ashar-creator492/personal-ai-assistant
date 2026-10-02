@@ -7,13 +7,41 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from streamlit.testing.v1 import AppTest
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.assistant.conversations import ConversationManager
-from app import event_parts, local_datetime, service_for_tool
+from app import (checkpoint_pending_turn, event_parts, local_datetime, pending_in_history,
+                 phase_label, service_for_tool)
 
 
 class AppTests(unittest.TestCase):
+    def test_progress_labels_use_real_phase_and_tool_arguments(self):
+        self.assertEqual(phase_label({"phase": "thinking"}), "Thinking...")
+        self.assertEqual(phase_label({"phase": "writing"}), "Writing the reply...")
+        self.assertEqual(phase_label({"phase": "waiting"}), "Waiting for your confirmation")
+        self.assertEqual(phase_label({"phase": "tool", "tool": "get_recent_emails", "args": {}}),
+                         "Checking Gmail...")
+        self.assertEqual(phase_label({"phase": "tool", "tool": "get_upcoming_events", "args": {}}),
+                         "Checking calendar...")
+        self.assertEqual(phase_label({"phase": "tool", "tool": "get_weather",
+                                      "args": {"city": "Lahore"}}),
+                         "Getting weather for Lahore...")
+        self.assertIsNone(phase_label({"phase": "tool", "tool": "unknown", "args": {}}))
+
+    def test_pending_turn_is_not_rendered_twice_after_checkpoint_save(self):
+        pending = {"prompt": "hello", "turn_id": "turn-1"}
+        messages = [HumanMessage(content="hello", additional_kwargs={"aether_turn_id": "turn-1"})]
+        self.assertTrue(pending_in_history(messages, pending))
+        self.assertFalse(pending_in_history([HumanMessage(content="hello")], pending))
+
+        snapshot = SimpleNamespace(next=("aether",), values={"messages": messages})
+        recovered = checkpoint_pending_turn(snapshot, [])
+        self.assertEqual(recovered["prompt"], "hello")
+        self.assertEqual(recovered["turn_id"], "turn-1")
+        self.assertTrue(recovered["resume"])
+        self.assertTrue(pending_in_history(messages, recovered))
+        self.assertIsNone(checkpoint_pending_turn(snapshot, [{"id": "approval"}]))
+
     def test_display_dates_and_tool_labels(self):
         self.assertEqual(local_datetime("Fri, 2 Oct 2026 02:08:04 +0000 (UTC)").strftime("%I:%M %p"), "07:08 AM")
         self.assertEqual(event_parts("2026-10-03T01:00:00Z", "2026-10-03T03:00:00Z"),
@@ -102,10 +130,10 @@ class AppTests(unittest.TestCase):
             async def state(thread_id):
                 return SimpleNamespace(values={}, tasks=[])
 
-            async def invoke(thread_id, message=None, approvals=None, progress=None):
+            async def invoke(thread_id, message=None, approvals=None, progress=None, turn_id=None):
                 calls.append((thread_id, message, approvals))
                 if progress:
-                    progress("get_recent_emails")
+                    progress({"phase": "tool", "tool": "get_recent_emails", "args": {}})
 
             with patch("src.assistant.conversations.ConversationManager", return_value=manager), \
                  patch("src.assistant.agent.conversation_state", state), \
@@ -121,6 +149,7 @@ class AppTests(unittest.TestCase):
                 new_thread = manager.get("New conversation")
                 self.assertEqual(app.session_state["active_conversation"], "New conversation")
                 app.button(key="suggest-Check my unread emails").click().run(timeout=15)
+                app.run(timeout=15)
                 self.assertEqual(calls, [(new_thread, "Check my unread emails", None)])
                 self.assertEqual(manager.get("Check my unread emails"), new_thread)
                 self.assertEqual(app.session_state["active_conversation"], "Check my unread emails")
@@ -149,7 +178,7 @@ class AppTests(unittest.TestCase):
                 tasks = [SimpleNamespace(interrupts=[SimpleNamespace(value=pending)])] if pending else []
                 return SimpleNamespace(values={}, tasks=tasks)
 
-            async def invoke(selected_thread, message=None, approvals=None, progress=None):
+            async def invoke(selected_thread, message=None, approvals=None, progress=None, turn_id=None):
                 calls.append((selected_thread, approvals))
                 pending.clear()
 

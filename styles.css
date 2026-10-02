@@ -313,3 +313,25 @@ section[data-testid="stSidebar"] :is(.st-key-active-conversation,[class*="st-key
 .success-chip { display:inline-flex; align-items:center; gap:3px; }
 .success-chip .material-symbols-outlined { font-size:12px; }
 section[data-testid="stSidebar"] :is(.st-key-active-conversation,[class*="st-key-conversation-"]) [data-testid="stButton"] button > div { display:flex !important; width:100%; justify-content:flex-start !important; min-width:0; }
+
+/* In-flight assistant turn. */
+.working-progress { min-height:38px; display:flex; flex-direction:column; justify-content:center; color:var(--muted); }
+.working-line { display:flex; min-height:22px; align-items:center; gap:7px; font-size:12px; }
+.working-spinner { width:12px; height:12px; flex:none; border:1.5px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:aether-spin .8s linear infinite; }
+.working-dots { display:inline-flex; align-items:center; gap:2px; margin-left:-4px; }
+.working-dots i { width:3px; height:3px; border-radius:50%; background:currentColor; animation:aether-dot 1.2s ease-in-out infinite; }
+.working-dots i:nth-child(2) { animation-delay:.16s; }
+.working-dots i:nth-child(3) { animation-delay:.32s; }
+.working-elapsed { margin-left:3px; font-variant-numeric:tabular-nums; color:var(--muted); }
+.working-long { margin:3px 0 0 19px; color:var(--muted); font-size:11px; }
+.waiting-status { margin:0 0 9px; color:var(--muted); font-size:12px; }
+.run-failure { margin:1px 0 9px; color:var(--muted); font-size:13px; }
+[class*="st-key-retry-"] button { background:transparent !important; color:var(--accent) !important; border:1px solid var(--border) !important; box-shadow:none !important; }
+[data-testid="stChatInput"]:has(textarea:disabled) { opacity:.72; border-color:var(--border) !important; }
+[data-testid="stChatInput"] button:disabled { background:var(--border) !important; color:var(--muted) !important; cursor:not-allowed; opacity:1 !important; }
+@keyframes aether-spin { to { transform:rotate(360deg); } }
+@keyframes aether-dot { 0%, 60%, 100% { opacity:.28; } 30% { opacity:1; } }
+@media (prefers-reduced-motion:reduce) {
+  .working-spinner, .working-dots i { animation:none; }
+  .working-dots i { opacity:.65; }
+}
