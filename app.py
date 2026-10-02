@@ -106,7 +106,9 @@ def sidebar(manager, conversations, snapshots):
               st.markdown(f'<div class="conversation-group">{group}</div>', unsafe_allow_html=True)
               for name, thread_id in items:
                   active = name == st.session_state.active_conversation
-                  with st.container(key="active-conversation" if active else f"conversation-{thread_id}"):
+                  row_key = (f"conversation-row-active-{thread_id}" if active
+                             else f"conversation-row-{thread_id}")
+                  with st.container(key=row_key):
                       row, time_col, menu = st.columns([5, 1.1, .7], gap=None, vertical_alignment="center")
                       with row:
                           if st.button(name, key=f"select-{thread_id}", icon=":material/chat_bubble_outline:",
@@ -700,25 +702,27 @@ def main():
         st.session_state.run_error = None
     with st.container(key="chat-content"):
         header(name)
-        messages = snapshot.values.get("messages", [])
-        has_messages = message_list(messages)
-        status_slot = render_pending_turn(messages)
-        if actions:
-            confirmation_card(actions)
-        elif not has_messages and not st.session_state.get("pending_turn"):
-            suggestion = empty_state()
-            if suggestion:
-                queue_message(suggestion, first_turn=True)
-    with st.container(key="input-chips"):
-        for column, (label, starter) in zip(st.columns(3, gap="small"), (
-            ("Email", "Show my unread emails"), ("Calendar", "What's on my calendar this week?"),
-            ("Weather", "What's the weather in Rawalpindi?"))):
-            if column.button(label, key=f"starter-{label}",
-                             disabled=bool(actions) or st.session_state.get("run_active", False)):
-                st.session_state.composer = starter
-    run_active = st.session_state.get("run_active", False)
-    prompt = st.chat_input("Aether is working..." if run_active else "Message Aether",
-                           disabled=bool(actions) or run_active, key="composer")
+        with st.container(key="message-area"):
+            messages = snapshot.values.get("messages", [])
+            has_messages = message_list(messages)
+            status_slot = render_pending_turn(messages)
+            if actions:
+                confirmation_card(actions)
+            elif not has_messages and not st.session_state.get("pending_turn"):
+                suggestion = empty_state()
+                if suggestion:
+                    queue_message(suggestion, first_turn=True)
+    with st.container(key="composer-dock"):
+        with st.container(key="input-chips"):
+            for column, (label, starter) in zip(st.columns(3, gap="small"), (
+                ("Email", "Show my unread emails"), ("Calendar", "What's on my calendar this week?"),
+                ("Weather", "What's the weather in Rawalpindi?"))):
+                if column.button(label, key=f"starter-{label}",
+                                 disabled=bool(actions) or st.session_state.get("run_active", False)):
+                    st.session_state.composer = starter
+        run_active = st.session_state.get("run_active", False)
+        prompt = st.chat_input("Aether is working..." if run_active else "Message Aether",
+                               disabled=bool(actions) or run_active, key="composer")
     if prompt:
         first_turn = not any(isinstance(message, HumanMessage) for message in messages)
         queue_message(prompt, first_turn=first_turn)
