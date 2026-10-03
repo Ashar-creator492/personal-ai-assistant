@@ -4,6 +4,7 @@ import asyncio
 import ast
 import base64
 import json
+import os
 import queue
 import re
 import threading
@@ -30,10 +31,29 @@ SUGGESTIONS = (
 )
 EMOJI = re.compile("[\U0001F1E6-\U0001F1FF\U0001F300-\U0001FAFF\u2600-\u27BF\ufe0f\u200d\u20e3]")
 LOCAL_TIME = ZoneInfo("Asia/Karachi")
+SETTINGS_PATH = ROOT / "ui_settings.json"
 
 
 def safe(value):
     return escape(str(value))
+
+
+def load_ui_settings():
+    try:
+        data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_appearance(mode):
+    SETTINGS_PATH.write_text(json.dumps({"appearance": mode}, indent=2) + "\n", encoding="utf-8")
+
+
+def set_appearance():
+    mode = st.session_state.appearance
+    st.session_state.dark_mode = mode == "Dark"
+    save_appearance(mode)
 
 
 def logo_image():
@@ -42,6 +62,9 @@ def logo_image():
 
 
 def setup_page():
+    settings = load_ui_settings()
+    if "dark_mode" not in st.session_state:
+        st.session_state.dark_mode = settings.get("appearance") == "Dark"
     logo = ROOT / "assets" / ("logo_dark.svg" if st.session_state.get("dark_mode") else "logo.svg")
     st.set_page_config(page_title="Aether", page_icon=str(logo),
                        layout="wide", initial_sidebar_state="expanded")
@@ -89,7 +112,7 @@ def sidebar(manager, conversations, snapshots):
     with st.sidebar:
         st.markdown(f'<div class="sidebar-brand"><img src="{logo_image()}" alt=""/>'
                     '<span class="wordmark">Aether</span></div>', unsafe_allow_html=True)
-        if st.button("New conversation", use_container_width=True, type="secondary"):
+        if st.button("New conversation", icon=":material/add:", use_container_width=True, type="secondary"):
             name = unique_name(conversations)
             manager.create(name)
             st.session_state.active_conversation = name
@@ -145,18 +168,28 @@ def sidebar(manager, conversations, snapshots):
                                       st.session_state.delete_target = None
                                       st.rerun()
         with st.container(key="services-footer"):
-            with st.popover("Account", icon=":material/account_circle:"):
-                st.toggle("Dark mode", key="dark_mode")
-                st.markdown('<div class="connected-services"><span class="dot"></span> Gmail'
-                            '<span class="dot"></span> Calendar<span class="dot"></span> Weather</div>',
-                            unsafe_allow_html=True)
+            display_name = os.getenv("AETHER_USER_NAME", "You").strip() or "You"
+            initial = next((character.upper() for character in display_name if character.isalnum()), "Y")
+            st.markdown(f'<span class="account-initial" data-initial="{safe(initial)}"></span>',
+                        unsafe_allow_html=True)
+            st.markdown(f'<style>.st-key-services-footer [data-testid="stPopoverButton"]::before'
+                        f'{{content:"{safe(initial)}"}}</style>', unsafe_allow_html=True)
+            with st.popover(display_name):
+                st.markdown('<div class="account-section-label">Appearance</div>', unsafe_allow_html=True)
+                st.radio("Appearance", ("Light", "Dark"), horizontal=True, label_visibility="collapsed",
+                         key="appearance", index=1 if st.session_state.dark_mode else 0,
+                         on_change=set_appearance)
+                st.markdown('<div class="account-section-label">Connected tools</div>'
+                            '<div class="connected-services"><span>Gmail</span><span>Calendar</span>'
+                            '<span>Weather</span></div><div class="account-info">'
+                            '<span>Timezone</span><strong>Asia/Karachi</strong></div>', unsafe_allow_html=True)
 
 
 def header(name):
     st.markdown(f'<div class="chat-header"><h1 class="conversation-title" title="{safe(name)}">'
                 f'{safe(name)}</h1><span class="header-services">'
-                '<span class="status-chip"><i></i>Gmail</span><span class="status-chip"><i></i>Calendar</span>'
-                '<span class="status-chip"><i></i>Weather</span><span class="status-chip groq-chip">Groq</span>'
+                '<span class="status-chip">Gmail</span><span class="status-chip">Calendar</span>'
+                '<span class="status-chip">Weather</span><span class="status-chip groq-chip">Groq</span>'
                 '</span></div>',
                 unsafe_allow_html=True)
 
@@ -667,6 +700,8 @@ def checkpoint_pending_turn(snapshot, actions):
 
 def main():
     setup_page()
+    st.markdown(f'<div class="collapsed-brand"><img src="{logo_image()}" alt=""/>'
+                '<span class="wordmark">Aether</span></div>', unsafe_allow_html=True)
     manager = ConversationManager(ROOT / "conversations.json")
     conversations = manager.list()
     if st.session_state.get("active_conversation") not in conversations:

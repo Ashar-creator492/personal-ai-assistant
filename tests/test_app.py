@@ -161,7 +161,7 @@ class AppTests(unittest.TestCase):
                 app.button(key=f"confirm-delete-{new_thread}").click().run(timeout=15)
                 self.assertEqual(manager.list(), {"Existing": existing})
                 self.assertFalse(app.exception)
-                app.toggle[0].set_value(True).run(timeout=15)
+                app.radio[0].set_value("Dark").run(timeout=15)
                 self.assertTrue(app.session_state["dark_mode"])
                 self.assertTrue(any("aether-dark-marker" in item.value for item in app.markdown))
 
