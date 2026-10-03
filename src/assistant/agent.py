@@ -25,6 +25,13 @@ from src.assistant.conversations import ConversationManager
 
 load_dotenv()
 
+AETHER_MODEL_NAME = "openai/gpt-oss-20b"
+
+
+def create_chat_model():
+    return ChatGroq(model=AETHER_MODEL_NAME, temperature=0,
+                    api_key=os.getenv("GROQ_API_KEY"))
+
 
 SYSTEM_PROMPT = """
 You are Aether, a personal AI assistant.
@@ -475,8 +482,7 @@ def build_graph(llm_with_tools, tools, checkpointer, progress=None):
 async def invoke_agent(thread_id, message=None, approvals=None, progress=None, turn_id=None):
     """Run one turn or resume a paused write operation."""
     tools = await client.get_tools()
-    llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0,
-                   api_key=os.getenv("GROQ_API_KEY"))
+    llm = create_chat_model()
     async with AsyncSqliteSaver.from_conn_string("checkpoints.db") as checkpointer:
         run_state = {"used_tool": False}
 
@@ -540,11 +546,7 @@ async def main():
     # LLM
     # --------------------------------------------------
 
-    llm = ChatGroq(
-        model="openai/gpt-oss-20b",
-        temperature=0,
-        api_key=os.getenv("GROQ_API_KEY"),
-    )
+    llm = create_chat_model()
 
     llm_with_tools = llm.bind_tools(tools)
 

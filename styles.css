@@ -92,7 +92,7 @@ section[data-testid="stSidebar"] [class*="st-key-confirm-delete-"] button { colo
 .connected-services { display:flex; flex-wrap:wrap; gap:6px; margin:5px 0 16px; }
 .connected-services span { padding:3px 7px; border:1px solid var(--border); border-radius:99px; color:var(--muted); font-size:10px; }
 .account-section-label { margin:6px 0; color:var(--muted); font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }
-.account-info { display:flex; justify-content:space-between; gap:16px; padding-top:10px; border-top:1px solid var(--border); color:var(--muted); font-size:11px; }
+.account-info { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:5px 16px; padding-top:10px; border-top:1px solid var(--border); color:var(--muted); font-size:11px; }
 .account-info strong { color:var(--text); font-weight:500; }
 .collapsed-brand { display:none; position:fixed; z-index:1000; top:16px; left:58px; height:32px; align-items:center; gap:9px; }
 .collapsed-brand img { width:22px; height:22px; }

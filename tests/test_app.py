@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -10,11 +11,54 @@ from streamlit.testing.v1 import AppTest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.assistant.conversations import ConversationManager
-from app import (checkpoint_pending_turn, event_parts, local_datetime, pending_in_history,
-                 phase_label, service_for_tool)
+from app import (checkpoint_pending_turn, clean_conversation_title, event_parts,
+                 generate_conversation_title, is_default_name, is_substantive_message,
+                 local_datetime, pending_in_history, phase_label, service_for_tool,
+                 should_auto_title)
 
 
 class AppTests(unittest.TestCase):
+    def test_conversation_title_cleaner(self):
+        cases = {
+            "i have a cricket game tomorrow, 6AM to 8Am ,set it up in calendars": "I have a cricket game",
+            "check my calendar and , at 5pm": "Check my calendar",
+            "give me last 3 mails": "Last 3 mails",
+            "can you check weather in islamabad please": "Check weather in islamabad",
+            "Draft an email": "Draft an email",
+        }
+        for message, expected in cases.items():
+            with self.subTest(message=message):
+                self.assertEqual(clean_conversation_title(message), expected)
+
+    def test_default_name_greeting_deferral_and_manual_name(self):
+        self.assertTrue(is_default_name("New conversation"))
+        self.assertTrue(is_default_name("New conversation 4"))
+        self.assertFalse(is_default_name("Project plan"))
+        for greeting in ("hi", "hello", "hey aether"):
+            self.assertFalse(is_substantive_message(greeting))
+            self.assertFalse(should_auto_title("New conversation", greeting))
+        self.assertTrue(should_auto_title("New conversation 2", "check weather in Lahore"))
+        self.assertFalse(should_auto_title("My Lahore trip", "check weather in Lahore"))
+
+    def test_generated_title_failure_and_timeout_leave_fallback_available(self):
+        fallback = clean_conversation_title("check weather in Islamabad please")
+
+        class FailingModel:
+            async def ainvoke(self, messages):
+                raise RuntimeError("offline")
+
+        class SlowModel:
+            async def ainvoke(self, messages):
+                await asyncio.sleep(.05)
+                return AIMessage(content="Islamabad weather")
+
+        for factory, timeout in ((FailingModel, 5), (SlowModel, .001)):
+            with self.subTest(factory=factory.__name__):
+                with self.assertRaises((RuntimeError, TimeoutError)):
+                    asyncio.run(generate_conversation_title(
+                        "check weather in Islamabad please", factory, timeout=timeout))
+                self.assertEqual(fallback, "Check weather in Islamabad")
+
     def test_progress_labels_use_real_phase_and_tool_arguments(self):
         self.assertEqual(phase_label({"phase": "thinking"}), "Thinking...")
         self.assertEqual(phase_label({"phase": "writing"}), "Writing the reply...")
