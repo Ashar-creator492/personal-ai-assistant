@@ -20,11 +20,13 @@ from app import (checkpoint_pending_turn, clean_conversation_title, event_parts,
 class AppTests(unittest.TestCase):
     def test_conversation_title_cleaner(self):
         cases = {
-            "i have a cricket game tomorrow, 6AM to 8Am ,set it up in calendars": "I have a cricket game",
-            "check my calendar and , at 5pm": "Check my calendar",
+            "i have a cricket game tomorrow, 6AM to 8Am ,set it up in calendars": "I have a cricket game tomorrow",
+            "check my calendar and , at 5pm": "Check my calendar at 5pm",
             "give me last 3 mails": "Last 3 mails",
             "can you check weather in islamabad please": "Check weather in islamabad",
             "Draft an email": "Draft an email",
+            "send email": "Send an email",
+            "send an email to my friend": "Send an email to my friend",
         }
         for message, expected in cases.items():
             with self.subTest(message=message):
@@ -37,6 +39,7 @@ class AppTests(unittest.TestCase):
         for greeting in ("hi", "hello", "hey aether"):
             self.assertFalse(is_substantive_message(greeting))
             self.assertFalse(should_auto_title("New conversation", greeting))
+        self.assertTrue(should_auto_title("New conversation", "send email"))
         self.assertTrue(should_auto_title("New conversation 2", "check weather in Lahore"))
         self.assertFalse(should_auto_title("My Lahore trip", "check weather in Lahore"))
 
