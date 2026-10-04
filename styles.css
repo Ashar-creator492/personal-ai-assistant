@@ -185,7 +185,7 @@ html:has(.aether-dark-marker) a { color:var(--accent) !important; }
 html:has(.aether-dark-marker) input[type="checkbox"] { accent-color:var(--accent); }
 
 /* Conversation row menu is rendered in a body-level portal. */
-[data-testid="stPopoverBody"][aria-label="..."] { background:var(--surface) !important; color:var(--text) !important; border:1px solid var(--border) !important; }
+[data-testid="stPopoverBody"][aria-label="..."] { width:280px; min-width:240px; max-width:min(300px, calc(100vw - 24px)); padding:12px; background:var(--surface) !important; color:var(--text) !important; border:1px solid var(--border) !important; }
 [data-testid="stPopoverBody"][aria-label="..."] > [data-testid="stVerticalBlock"] { gap:8px; }
 [data-testid="stPopoverBody"][aria-label="..."] [data-testid="stForm"] { padding:0 0 8px; border:0; border-bottom:1px solid var(--border); }
 [data-testid="stPopoverBody"][aria-label="..."] [data-testid="stForm"] > [data-testid="stVerticalBlock"] { gap:8px; }
@@ -194,25 +194,37 @@ html:has(.aether-dark-marker) input[type="checkbox"] { accent-color:var(--accent
 [data-testid="stPopoverBody"][aria-label="..."] [data-testid="stTextInputField"] { color:var(--text); background:transparent !important; caret-color:var(--accent); }
 [data-testid="stPopoverBody"][aria-label="..."] [data-testid="stFormSubmitButton"],
 [data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-regenerate-"],
-[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-delete-"],
-[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-confirm-delete-"],
-[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-cancel-delete-"] { width:100%; }
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-delete-"] { width:100%; }
 [data-testid="stPopoverBody"][aria-label="..."] button { width:100%; height:36px; min-height:36px; padding:0 12px; border-radius:8px; box-shadow:none; }
 [data-testid="stPopoverBody"][aria-label="..."] [data-testid="stFormSubmitButton"] button { border:1px solid var(--accent); background:var(--accent); color:#FFFFFF; }
 [data-testid="stPopoverBody"][aria-label="..."] [data-testid="stFormSubmitButton"] button:hover { filter:brightness(.94); }
 html:has(.aether-dark-marker) [data-testid="stPopoverBody"][aria-label="..."] [data-testid="stFormSubmitButton"] button { color:#111113; }
-[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-regenerate-"] button,
-[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-cancel-delete-"] button { border:1px solid var(--border); background:transparent; color:var(--text); }
-[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-regenerate-"] button:hover,
-[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-cancel-delete-"] button:hover { background:var(--accent-soft); }
-[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-delete-"] button,
-[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-confirm-delete-"] button { border:1px solid var(--danger-border); background:transparent; color:var(--danger); }
-[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-delete-"] button:hover,
-[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-confirm-delete-"] button:hover { background:var(--danger-soft); }
-[data-testid="stPopoverBody"][aria-label="..."] [data-testid="stAlertContainer"] { border:1px solid var(--danger-border); background:var(--danger-soft); color:var(--text); }
-[data-testid="stPopoverBody"][aria-label="..."] [data-testid="stAlertContainer"] p { color:var(--text) !important; }
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-regenerate-"] button { border:1px solid var(--border); background:transparent; color:var(--text); }
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-regenerate-"] button:hover { background:var(--accent-soft); }
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-delete-"] button { border:1px solid var(--danger-border); background:transparent; color:var(--danger); }
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-delete-"] button:hover { background:var(--danger-soft); }
 [data-testid="stPopoverBody"][aria-label="..."] button:disabled { border-color:var(--border); background:transparent; color:var(--muted); opacity:1; cursor:not-allowed; }
 [data-testid="stPopoverBody"][aria-label="..."] button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+
+/* Delete confirmation is isolated from the row menu in a dismissible portal dialog. */
+body:has([data-testid="stDialog"]) [data-testid="stPopoverBody"][aria-label="..."] { display:none; }
+[data-testid="stDialog"] section[role="dialog"] { color:var(--text); background:var(--surface); }
+[data-testid="stDialog"] section[role="dialog"] h2,
+[data-testid="stDialog"] section[role="dialog"] h2 p { color:var(--text) !important; }
+[data-testid="stDialog"] section[role="dialog"] > div > [data-testid="stVerticalBlock"] { gap:8px; }
+.delete-dialog-name { max-width:100%; overflow:hidden; color:var(--muted); font-size:13px; white-space:nowrap; text-overflow:ellipsis; }
+.delete-dialog-copy { margin:0; color:var(--text); font-size:14px; }
+.st-key-delete-dialog-actions > [data-testid="stVerticalBlock"] { display:flex; gap:8px; }
+.st-key-delete-dialog-actions [class*="st-key-confirm-dialog-cancel-"] { order:2; }
+.st-key-delete-dialog-actions [class*="st-key-confirm-dialog-delete-"] { order:1; }
+.st-key-delete-dialog-actions button { width:100%; height:36px; min-height:36px; border-radius:8px; box-shadow:none; }
+.st-key-delete-dialog-actions [class*="st-key-confirm-dialog-delete-"] button { border:1px solid var(--danger); background:var(--danger); color:#FFFFFF; }
+html:has(.aether-dark-marker) .st-key-delete-dialog-actions [class*="st-key-confirm-dialog-delete-"] button { color:#111113; }
+.st-key-delete-dialog-actions [class*="st-key-confirm-dialog-delete-"] button:hover { filter:brightness(.94); }
+.st-key-delete-dialog-actions [class*="st-key-confirm-dialog-cancel-"] button { border:1px solid var(--border); background:transparent; color:var(--text); }
+.st-key-delete-dialog-actions [class*="st-key-confirm-dialog-cancel-"] button:hover { background:var(--accent-soft); }
+.st-key-delete-dialog-actions button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+[data-testid="stDialog"] iframe { position:absolute; width:0 !important; height:0 !important; border:0; }
 
 @media (max-width:700px) {
   .chat-header, .st-key-message-area { width:calc(100% - 24px); }

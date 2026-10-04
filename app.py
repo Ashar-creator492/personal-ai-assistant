@@ -217,6 +217,69 @@ def relative_time(snapshot):
     return f"{elapsed // 86400}d"
 
 
+def bind_delete_target(state, name):
+    state["delete_target"] = name
+
+
+def clear_delete_target(state):
+    state["delete_target"] = None
+
+
+def delete_bound_conversation(manager, state, confirmed=False):
+    target = state.get("delete_target")
+    if not confirmed or not target:
+        clear_delete_target(state)
+        return False
+    was_active = state.get("active_conversation") == target
+    manager.delete(target)
+    clear_delete_target(state)
+    if was_active:
+        state["active_conversation"] = next(iter(manager.list()), None)
+    return True
+
+
+def dismiss_delete_dialog():
+    clear_delete_target(st.session_state)
+
+
+@st.dialog("Delete this conversation?", width="small", dismissible=True,
+           on_dismiss=dismiss_delete_dialog)
+def delete_conversation_dialog(manager):
+    target = st.session_state.get("delete_target")
+    if not target or manager.get(target) is None:
+        clear_delete_target(st.session_state)
+        st.rerun()
+    thread_id = manager.get(target)
+    st.markdown(f'<div class="delete-dialog-name" title="{safe(target)}">{safe(target)}</div>'
+                '<p class="delete-dialog-copy">It will be removed from your list.</p>',
+                unsafe_allow_html=True)
+    with st.container(key="delete-dialog-actions"):
+        cancel = st.button("Cancel", key=f"confirm-dialog-cancel-{thread_id}", use_container_width=True)
+        delete = st.button("Delete", key=f"confirm-dialog-delete-{thread_id}", use_container_width=True)
+    st.iframe("""<script>
+      setTimeout(() => {
+        const dialog = window.parent.document.querySelector('[data-testid="stDialog"] section[role="dialog"]');
+        const cancel = dialog?.querySelector('[class*="st-key-confirm-dialog-cancel-"] button');
+        cancel?.focus({preventScroll:true});
+        if (dialog && !dialog.dataset.aetherEscapeBound) {
+          dialog.dataset.aetherEscapeBound = 'true';
+          window.parent.document.addEventListener('keydown', event => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              cancel?.click();
+            }
+          }, true);
+        }
+      }, 60);
+    </script>""", width=1, height=1)
+    if cancel:
+        clear_delete_target(st.session_state)
+        st.rerun()
+    if delete and delete_bound_conversation(manager, st.session_state, confirmed=True):
+        st.session_state.conversation_deleted_toast = True
+        st.rerun()
+
+
 def sidebar(manager, conversations, snapshots):
     with st.sidebar:
         st.markdown(f'<div class="sidebar-brand"><img src="{logo_image()}" alt=""/>'
@@ -270,18 +333,8 @@ def sidebar(manager, conversations, snapshots):
                                   start_title_upgrade(ROOT / "conversations.json", thread_id, name, title_message)
                                   st.rerun()
                               if st.button("Delete conversation", key=f"delete-{thread_id}"):
-                                  st.session_state.delete_target = name
-                              if st.session_state.get("delete_target") == name:
-                                  st.warning("Remove this conversation from the list? Saved checkpoint data remains.")
-                                  if st.button("Confirm delete", key=f"confirm-delete-{thread_id}", type="secondary"):
-                                      manager.delete(name)
-                                      st.session_state.delete_target = None
-                                      if active:
-                                          st.session_state.active_conversation = next(iter(manager.list()), None)
-                                      st.rerun()
-                                  if st.button("Cancel", key=f"cancel-delete-{thread_id}"):
-                                      st.session_state.delete_target = None
-                                      st.rerun()
+                                  bind_delete_target(st.session_state, name)
+                                  st.rerun()
         with st.container(key="services-footer"):
             display_name = os.getenv("AETHER_USER_NAME", "You").strip() or "You"
             initial = next((character.upper() for character in display_name if character.isalnum()), "Y")
@@ -836,6 +889,11 @@ def main():
             if st.session_state.active_conversation == name:
                 st.session_state.active_conversation = title
     sidebar(manager, conversations, snapshots)
+    if st.session_state.get("conversation_deleted_toast"):
+        st.session_state.conversation_deleted_toast = False
+        st.toast("Conversation deleted")
+    if st.session_state.get("delete_target"):
+        delete_conversation_dialog(manager)
     if not st.session_state.active_conversation:
         st.markdown('<div class="empty-title">Aether</div>', unsafe_allow_html=True)
         st.write("Create a conversation to begin.")

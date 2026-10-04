@@ -12,12 +12,42 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.assistant.conversations import ConversationManager
 from app import (checkpoint_pending_turn, clean_conversation_title, event_parts,
+                 bind_delete_target, clear_delete_target, delete_bound_conversation,
                  generate_conversation_title, is_default_name, is_substantive_message,
                  local_datetime, pending_in_history, phase_label, service_for_tool,
                  should_auto_title)
 
 
 class AppTests(unittest.TestCase):
+    def test_delete_target_requires_explicit_confirmation(self):
+        class Manager:
+            def __init__(self):
+                self.deleted = []
+
+            def delete(self, name):
+                self.deleted.append(name)
+
+            def list(self):
+                return {"Other": "thread-2"}
+
+        manager = Manager()
+        state = {"active_conversation": "Other"}
+        bind_delete_target(state, "Clicked row")
+        self.assertEqual(state["delete_target"], "Clicked row")
+        self.assertFalse(delete_bound_conversation(manager, state, confirmed=False))
+        self.assertEqual(manager.deleted, [])
+        self.assertIsNone(state["delete_target"])
+
+        bind_delete_target(state, "Clicked row")
+        clear_delete_target(state)
+        self.assertEqual(manager.deleted, [])
+        self.assertIsNone(state["delete_target"])
+
+        bind_delete_target(state, "Clicked row")
+        self.assertTrue(delete_bound_conversation(manager, state, confirmed=True))
+        self.assertEqual(manager.deleted, ["Clicked row"])
+        self.assertEqual(state["active_conversation"], "Other")
+
     def test_conversation_title_cleaner(self):
         cases = {
             "i have a cricket game tomorrow, 6AM to 8Am ,set it up in calendars": "I have a cricket game tomorrow",
@@ -205,7 +235,7 @@ class AppTests(unittest.TestCase):
                 app.button(key=f"FormSubmitter:rename-{new_thread}-Save").click().run(timeout=15)
                 self.assertEqual(manager.get("Renamed"), new_thread)
                 app.button(key=f"delete-{new_thread}").click().run(timeout=15)
-                app.button(key=f"confirm-delete-{new_thread}").click().run(timeout=15)
+                app.button(key=f"confirm-dialog-delete-{new_thread}").click().run(timeout=15)
                 self.assertEqual(manager.list(), {"Existing": existing})
                 self.assertFalse(app.exception)
                 app.radio[0].set_value("Dark").run(timeout=15)
