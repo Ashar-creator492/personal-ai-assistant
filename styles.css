@@ -3,12 +3,14 @@
 :root {
   --page:#FAFAF7; --main:#FFFFFF; --surface:#FFFFFF; --sidebar:#F1F0EB; --text:#1A1A1A;
   --muted:#6B6B66; --border:#E3E1DA; --accent:#3B5BDB; --accent-soft:#E8ECFB;
+  --danger:#B83A3A; --danger-soft:rgba(184,58,58,.10); --danger-border:rgba(184,58,58,.40);
   --gmail:#D64545; --gmail-soft:rgba(214,69,69,.12);
   --weather:#B57B18; --weather-soft:rgba(224,160,48,.12);
 }
 html:has(.aether-dark-marker) {
   --page:#111113; --main:#111113; --surface:#17171A; --sidebar:#17171A; --text:#ECECEA;
   --muted:#8A8A90; --border:#2A2A2F; --accent:#7C93F5; --accent-soft:#1F2540;
+  --danger:#F08080; --danger-soft:rgba(240,128,128,.10); --danger-border:rgba(240,128,128,.40);
   --gmail:#E06A6A; --gmail-soft:rgba(214,69,69,.12);
   --weather:#E0A030; --weather-soft:rgba(224,160,48,.12);
 }
@@ -29,7 +31,7 @@ header[data-testid="stHeader"] { background:transparent !important; height:auto 
 [data-testid="stExpandSidebarButton"] button:focus-visible, [data-testid="stSidebarCollapseButton"] button:focus-visible { outline:2px solid var(--accent) !important; outline-offset:1px; }
 [data-testid="stExpandSidebarButton"] [data-testid="stIconMaterial"], [data-testid="stSidebarCollapseButton"] [data-testid="stIconMaterial"] { display:none !important; }
 [data-testid="stPopoverBody"], [data-testid="stExpander"], [data-testid="stStatusWidget"], [data-testid="stCodeBlock"] { background:var(--surface) !important; color:var(--text) !important; border-color:var(--border) !important; box-shadow:none !important; }
-[data-testid="stPopoverBody"] button, [data-testid="stPopoverBody"] input, [data-testid="stPopoverBody"] label { color:var(--text) !important; }
+[data-testid="stPopoverBody"] input, [data-testid="stPopoverBody"] label { color:var(--text) !important; }
 [data-testid="stPopoverBody"] [data-baseweb="input"], [data-testid="stPopoverBody"] input { background:var(--surface) !important; }
 [data-testid="stPopoverBody"] button[kind="primary"] { background:var(--accent) !important; color:#fff !important; }
 pre, code { background:var(--surface); color:var(--text); }
@@ -82,8 +84,8 @@ section[data-testid="stSidebar"] [class*="st-key-conversation-row-"] [data-testi
 section[data-testid="stSidebar"] [class*="st-key-conversation-row-"] [data-testid="stPopover"] { opacity:0; transition:opacity .12s; }
 section[data-testid="stSidebar"] [class*="st-key-conversation-row-active-"] [data-testid="stPopover"],
 section[data-testid="stSidebar"] [class*="st-key-conversation-row-"]:hover [data-testid="stPopover"] { opacity:1; }
-section[data-testid="stSidebar"] [class*="st-key-conversation-row-"]:focus-within { outline:2px solid var(--accent); outline-offset:-2px; }
 section[data-testid="stSidebar"] [data-testid="stPopoverButton"] { min-width:24px !important; width:24px; height:28px; padding:0 !important; border:0 !important; background:transparent !important; color:var(--muted) !important; font-size:13px; box-shadow:none !important; }
+section[data-testid="stSidebar"] [class*="st-key-conversation-row-"] button:focus-visible { outline:2px solid var(--accent) !important; outline-offset:-2px; }
 section[data-testid="stSidebar"] [data-testid="stPopoverButton"] [data-testid="stIconMaterial"],
 section[data-testid="stSidebar"] [data-testid="stPopoverButton"] svg { display:none !important; }
 section[data-testid="stSidebar"] [class*="st-key-confirm-delete-"] button { color:var(--gmail) !important; border-color:var(--gmail) !important; }
@@ -168,7 +170,8 @@ html:has(.aether-dark-marker) [data-testid="stStatusWidget"],
 html:has(.aether-dark-marker) [data-testid="stCodeBlock"] { background:var(--surface) !important; color:var(--text) !important; border-color:var(--border) !important; }
 html:has(.aether-dark-marker) [data-testid="stSidebar"] { background:var(--sidebar) !important; }
 html:has(.aether-dark-marker) [data-testid="stPopover"] button,
-html:has(.aether-dark-marker) button,
+html:has(.aether-dark-marker) section[data-testid="stSidebar"] button,
+html:has(.aether-dark-marker) section[data-testid="stMain"] button,
 html:has(.aether-dark-marker) input,
 html:has(.aether-dark-marker) textarea { color:var(--text) !important; caret-color:var(--accent) !important; box-shadow:none !important; }
 html:has(.aether-dark-marker) input::placeholder,
@@ -180,6 +183,36 @@ html:has(.aether-dark-marker) button[kind="primary"] { background:var(--accent) 
 html:has(.aether-dark-marker) pre, html:has(.aether-dark-marker) code { background:#1E1E22 !important; color:var(--text) !important; }
 html:has(.aether-dark-marker) a { color:var(--accent) !important; }
 html:has(.aether-dark-marker) input[type="checkbox"] { accent-color:var(--accent); }
+
+/* Conversation row menu is rendered in a body-level portal. */
+[data-testid="stPopoverBody"][aria-label="..."] { background:var(--surface) !important; color:var(--text) !important; border:1px solid var(--border) !important; }
+[data-testid="stPopoverBody"][aria-label="..."] > [data-testid="stVerticalBlock"] { gap:8px; }
+[data-testid="stPopoverBody"][aria-label="..."] [data-testid="stForm"] { padding:0 0 8px; border:0; border-bottom:1px solid var(--border); }
+[data-testid="stPopoverBody"][aria-label="..."] [data-testid="stForm"] > [data-testid="stVerticalBlock"] { gap:8px; }
+[data-testid="stPopoverBody"][aria-label="..."] [data-testid="stTextInputRootElement"] { min-height:36px; overflow:hidden; border:1px solid var(--border); border-radius:8px; background:var(--surface); box-shadow:none; }
+[data-testid="stPopoverBody"][aria-label="..."] [data-testid="stTextInputRootElement"]:focus-within { border-color:var(--accent); }
+[data-testid="stPopoverBody"][aria-label="..."] [data-testid="stTextInputField"] { color:var(--text); background:transparent !important; caret-color:var(--accent); }
+[data-testid="stPopoverBody"][aria-label="..."] [data-testid="stFormSubmitButton"],
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-regenerate-"],
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-delete-"],
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-confirm-delete-"],
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-cancel-delete-"] { width:100%; }
+[data-testid="stPopoverBody"][aria-label="..."] button { width:100%; height:36px; min-height:36px; padding:0 12px; border-radius:8px; box-shadow:none; }
+[data-testid="stPopoverBody"][aria-label="..."] [data-testid="stFormSubmitButton"] button { border:1px solid var(--accent); background:var(--accent); color:#FFFFFF; }
+[data-testid="stPopoverBody"][aria-label="..."] [data-testid="stFormSubmitButton"] button:hover { filter:brightness(.94); }
+html:has(.aether-dark-marker) [data-testid="stPopoverBody"][aria-label="..."] [data-testid="stFormSubmitButton"] button { color:#111113; }
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-regenerate-"] button,
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-cancel-delete-"] button { border:1px solid var(--border); background:transparent; color:var(--text); }
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-regenerate-"] button:hover,
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-cancel-delete-"] button:hover { background:var(--accent-soft); }
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-delete-"] button,
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-confirm-delete-"] button { border:1px solid var(--danger-border); background:transparent; color:var(--danger); }
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-delete-"] button:hover,
+[data-testid="stPopoverBody"][aria-label="..."] [class*="st-key-confirm-delete-"] button:hover { background:var(--danger-soft); }
+[data-testid="stPopoverBody"][aria-label="..."] [data-testid="stAlertContainer"] { border:1px solid var(--danger-border); background:var(--danger-soft); color:var(--text); }
+[data-testid="stPopoverBody"][aria-label="..."] [data-testid="stAlertContainer"] p { color:var(--text) !important; }
+[data-testid="stPopoverBody"][aria-label="..."] button:disabled { border-color:var(--border); background:transparent; color:var(--muted); opacity:1; cursor:not-allowed; }
+[data-testid="stPopoverBody"][aria-label="..."] button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 
 @media (max-width:700px) {
   .chat-header, .st-key-message-area { width:calc(100% - 24px); }
