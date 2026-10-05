@@ -1,3 +1,4 @@
+# Approval tests prove write tools cannot run before an explicit user decision.
 import asyncio
 import tempfile
 import unittest
