@@ -1,3 +1,4 @@
+# MCP weather tools backed by Open-Meteo's geocoding and forecast APIs.
 from mcp.server.fastmcp import FastMCP
 import requests
 
