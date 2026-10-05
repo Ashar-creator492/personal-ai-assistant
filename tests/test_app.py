@@ -1,3 +1,4 @@
+# UI behavior tests use Streamlit's AppTest runner with isolated conversation registries.
 import asyncio
 import tempfile
 import unittest
