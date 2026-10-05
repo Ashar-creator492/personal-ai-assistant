@@ -1,4 +1,4 @@
-
+# Shared MCP client configuration for Aether's local service processes.
 import asyncio
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -46,4 +46,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
