@@ -1,3 +1,4 @@
+# Persistence tests keep the conversation registry aligned with LangGraph checkpoints.
 import asyncio
 import tempfile
 import unittest
