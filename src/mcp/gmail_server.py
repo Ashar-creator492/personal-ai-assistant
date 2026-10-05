@@ -1,3 +1,4 @@
+# MCP boundary for Gmail reads, drafts, sends, contacts, and related event lookup.
 from mcp.server.fastmcp import FastMCP
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
