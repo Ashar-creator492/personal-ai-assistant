@@ -23,6 +23,7 @@ from src.assistant.agent import AETHER_MODEL_NAME, conversation_state, create_ch
 from src.assistant.conversations import ConversationManager
 
 ROOT = Path(__file__).parent
+# UI-only defaults and title rules stay here so agent behavior remains independent of Streamlit.
 SUGGESTIONS = (
     "Check my unread emails",
     "What's on my calendar this week?",
