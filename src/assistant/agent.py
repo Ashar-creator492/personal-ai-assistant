@@ -1,3 +1,4 @@
+# LangGraph orchestration for Aether's model, tools, approvals, and persisted threads.
 import asyncio
 import os
 from datetime import datetime
