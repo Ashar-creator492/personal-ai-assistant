@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 class ConversationManager:
+    # Conversation names are a lightweight registry over stable LangGraph thread IDs.
     def __init__(self, path="conversations.json"):
         self.path = Path(path)
 
