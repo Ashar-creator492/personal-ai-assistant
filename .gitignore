@@ -6,4 +6,3 @@ credentials.json
 token.json
 conversations.json
 checkpoints.db*
-ui_settings.json

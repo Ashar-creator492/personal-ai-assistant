@@ -1,25 +1,16 @@
 [theme]
 base = "light"
-font = "sans serif"
-
-[theme.light]
-primaryColor = "#3B5BDB"
-backgroundColor = "#FAFAF7"
+primaryColor = "#C2458F"
+backgroundColor = "#FBF7F8"
 secondaryBackgroundColor = "#FFFFFF"
-textColor = "#1A1A1A"
+textColor = "#1B1822"
+font = "Plus Jakarta Sans:https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap"
+headingFont = "Plus Jakarta Sans:https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap"
+baseRadius = "16px"
+buttonRadius = "10px"
+showSidebarBorder = false
 
-[theme.dark]
-primaryColor = "#7C93F5"
-backgroundColor = "#111113"
-secondaryBackgroundColor = "#17171A"
-textColor = "#ECECEA"
-
-[theme.light.sidebar]
-backgroundColor = "#F1F0EB"
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#FFFFFF"
-textColor = "#1A1A1A"
-
-[theme.dark.sidebar]
-backgroundColor = "#141417"
-secondaryBackgroundColor = "#17171A"
-textColor = "#ECECEA"
+textColor = "#1B1822"

@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 from streamlit.testing.v1 import AppTest
@@ -16,7 +16,8 @@ from app import (checkpoint_pending_turn, clean_conversation_title, event_parts,
                  bind_delete_target, clear_delete_target, delete_bound_conversation,
                  generate_conversation_title, is_default_name, is_substantive_message,
                  local_datetime, pending_in_history, phase_label, service_for_tool,
-                 should_auto_title)
+                 should_auto_title, working_label, THINKING_LABELS, TURN_TIMEOUT_SECONDS,
+                 run_pending_turn)
 
 
 class AppTests(unittest.TestCase):
@@ -105,6 +106,38 @@ class AppTests(unittest.TestCase):
                                       "args": {"city": "Lahore"}}),
                          "Getting weather for Lahore...")
         self.assertIsNone(phase_label({"phase": "tool", "tool": "unknown", "args": {}}))
+
+    def test_thinking_timeline_and_tool_override(self):
+        self.assertEqual(TURN_TIMEOUT_SECONDS, 30)
+        for elapsed, expected in ((0, THINKING_LABELS[0]), (2, THINKING_LABELS[0]),
+                                  (3, THINKING_LABELS[1]), (6, THINKING_LABELS[2]),
+                                  (18, THINKING_LABELS[-1]), (29, THINKING_LABELS[-1])):
+            self.assertEqual(working_label("Thinking...", elapsed), expected)
+            self.assertEqual(working_label("Writing the reply...", elapsed), expected)
+        self.assertEqual(working_label("Checking Gmail...", 12), "Checking Gmail...")
+        self.assertEqual(working_label("Waiting for your confirmation", 90),
+                         "Waiting for your confirmation")
+
+    def test_timed_out_turn_keeps_prompt_and_releases_input(self):
+        pending = {"prompt": "Check my inbox", "turn_id": "same-turn"}
+        state = SimpleNamespace(pending_turn=pending, run_active=True, run_error=None)
+        cancelled = []
+
+        async def stalled(thread_id, message, progress, turn_id):
+            self.assertEqual((thread_id, message, turn_id),
+                             ("thread-1", "Check my inbox", "same-turn"))
+            try:
+                await asyncio.sleep(60)
+            finally:
+                cancelled.append(True)
+
+        with patch("app.st.session_state", state), patch("app.st.rerun"), \
+             patch("app.invoke_agent", stalled), patch("app.TURN_TIMEOUT_SECONDS", .01):
+            run_pending_turn("thread-1", Mock())
+        self.assertIs(state.pending_turn, pending)
+        self.assertFalse(state.run_active)
+        self.assertEqual(state.run_error, "The request timed out after 30 seconds.")
+        self.assertEqual(cancelled, [True])
 
     def test_pending_turn_is_not_rendered_twice_after_checkpoint_save(self):
         pending = {"prompt": "hello", "turn_id": "turn-1"}
@@ -239,9 +272,8 @@ class AppTests(unittest.TestCase):
                 app.button(key=f"confirm-dialog-delete-{new_thread}").click().run(timeout=15)
                 self.assertEqual(manager.list(), {"Existing": existing})
                 self.assertFalse(app.exception)
-                app.radio[0].set_value("Dark").run(timeout=15)
-                self.assertTrue(app.session_state["dark_mode"])
-                self.assertTrue(any("aether-dark-marker" in item.value for item in app.markdown))
+                self.assertEqual(len(app.radio), 0)
+                self.assertNotIn("dark_mode", app.session_state)
 
     def test_confirmation_uses_saved_thread(self):
         with tempfile.TemporaryDirectory() as directory:

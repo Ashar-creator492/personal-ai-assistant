@@ -32,7 +32,6 @@ SUGGESTIONS = (
 )
 EMOJI = re.compile("[\U0001F1E6-\U0001F1FF\U0001F300-\U0001FAFF\u2600-\u27BF\ufe0f\u200d\u20e3]")
 LOCAL_TIME = ZoneInfo("Asia/Karachi")
-SETTINGS_PATH = ROOT / "ui_settings.json"
 DEFAULT_CONVERSATION = re.compile(r"New conversation(?: \d+)?$")
 GREETING = re.compile(r"^(?:hey|hi|hello)(?:\s+aether)?[.!?]*$", re.IGNORECASE)
 TITLE_FILLER = re.compile(
@@ -46,39 +45,31 @@ def safe(value):
     return escape(str(value))
 
 
-def load_ui_settings():
-    try:
-        data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
-    return data if isinstance(data, dict) else {}
+@st.cache_data(show_spinner=False)
+def orb_image(size=96):
+    filename = "orb-512.webp" if size > 96 else "orb-photo-96.png"
+    mime = "image/webp" if size > 96 else "image/png"
+    data = (ROOT / "assets" / filename).read_bytes()
+    return f"data:{mime};base64," + base64.b64encode(data).decode("ascii")
 
 
-def save_appearance(mode):
-    SETTINGS_PATH.write_text(json.dumps({"appearance": mode}, indent=2) + "\n", encoding="utf-8")
+def orb_markup(kind="mark"):
+    source = orb_image(512 if kind in {"hero", "thinking"} else 96)
+    return (f'<span class="orb orb-{kind}" aria-hidden="true">'
+            f'<img class="orb-image" src="{source}" alt=""/>'
+            '<span class="orb-highlight"></span></span>')
 
 
-def set_appearance():
-    mode = st.session_state.appearance
-    st.session_state.dark_mode = mode == "Dark"
-    save_appearance(mode)
-
-
-def logo_image():
-    logo = ROOT / "assets" / ("logo_dark.svg" if st.session_state.get("dark_mode") else "logo.svg")
-    return "data:image/svg+xml;base64," + base64.b64encode(logo.read_bytes()).decode("ascii")
+def theme_color(token):
+    css = (ROOT / "styles.css").read_text(encoding="utf-8")
+    return re.search(rf"--{token}:\s*([^;]+);", css).group(1).strip()
 
 
 def setup_page():
-    settings = load_ui_settings()
-    if "dark_mode" not in st.session_state:
-        st.session_state.dark_mode = settings.get("appearance") == "Dark"
-    logo = ROOT / "assets" / ("logo_dark.svg" if st.session_state.get("dark_mode") else "logo.svg")
-    st.set_page_config(page_title="Aether", page_icon=str(logo),
+    st.set_page_config(page_title="Aether", page_icon=str(ROOT / "assets/favicon-32.png"),
                        layout="wide", initial_sidebar_state="expanded")
-    marker = '<span class="aether-dark-marker" hidden></span>' if st.session_state.get("dark_mode") else ""
-    st.markdown(f"<style>{(ROOT / 'styles.css').read_text(encoding='utf-8')}</style>{marker}",
-                unsafe_allow_html=True)
+    css = (ROOT / "styles.css").read_text(encoding="utf-8")
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
 
 
 def unique_name(conversations):
@@ -255,8 +246,8 @@ def delete_conversation_dialog(manager):
                 '<p class="delete-dialog-copy">It will be removed from your list.</p>',
                 unsafe_allow_html=True)
     with st.container(key="delete-dialog-actions"):
-        cancel = st.button("Cancel", key=f"confirm-dialog-cancel-{thread_id}", use_container_width=True)
-        delete = st.button("Delete", key=f"confirm-dialog-delete-{thread_id}", use_container_width=True)
+        cancel = st.button("Cancel", key=f"confirm-dialog-cancel-{thread_id}", width="stretch")
+        delete = st.button("Delete", key=f"confirm-dialog-delete-{thread_id}", width="stretch")
     st.iframe("""<script>
       setTimeout(() => {
         const dialog = window.parent.document.querySelector('[data-testid="stDialog"] section[role="dialog"]');
@@ -283,9 +274,9 @@ def delete_conversation_dialog(manager):
 
 def sidebar(manager, conversations, snapshots):
     with st.sidebar:
-        st.markdown(f'<div class="sidebar-brand"><img src="{logo_image()}" alt=""/>'
+        st.markdown(f'<div class="sidebar-brand">{orb_markup()}'
                     '<span class="wordmark">Aether</span></div>', unsafe_allow_html=True)
-        if st.button("New conversation", icon=":material/add:", use_container_width=True, type="secondary"):
+        if st.button("New conversation", icon=":material/add:", width="stretch", type="secondary"):
             name = unique_name(conversations)
             manager.create(name)
             st.session_state.active_conversation = name
@@ -308,7 +299,7 @@ def sidebar(manager, conversations, snapshots):
                       row, time_col, menu = st.columns([5, 1.1, .7], gap=None, vertical_alignment="center")
                       with row:
                           if st.button(name, key=f"select-{thread_id}", icon=":material/chat_bubble_outline:",
-                                       use_container_width=True):
+                                       width="stretch"):
                               st.session_state.active_conversation = name
                               st.rerun()
                       with time_col:
@@ -316,17 +307,18 @@ def sidebar(manager, conversations, snapshots):
                                       unsafe_allow_html=True)
                       with menu:
                           with st.popover("...", key=f"menu-{thread_id}"):
-                              with st.form(f"rename-{thread_id}"):
-                                  new_name = st.text_input("Rename", value=name)
-                                  if st.form_submit_button("Save", use_container_width=True):
-                                      try:
-                                          manager.rename(name, new_name)
-                                      except ValueError as error:
-                                          st.error(str(error))
-                                      else:
-                                          if active:
-                                              st.session_state.active_conversation = new_name.strip()
-                                          st.rerun()
+                              with st.expander("Rename", key=f"rename-view-{thread_id}"):
+                                  with st.form(f"rename-{thread_id}"):
+                                      new_name = st.text_input("Rename", value=name, label_visibility="collapsed")
+                                      if st.form_submit_button("Save", width="stretch"):
+                                          try:
+                                              manager.rename(name, new_name)
+                                          except ValueError as error:
+                                              st.error(str(error))
+                                          else:
+                                              if active:
+                                                  st.session_state.active_conversation = new_name.strip()
+                                              st.rerun()
                               history = snapshots[name].values.get("messages", [])
                               title_message = first_substantive_message(history)
                               if st.button("Regenerate title", key=f"regenerate-{thread_id}",
@@ -338,16 +330,9 @@ def sidebar(manager, conversations, snapshots):
                                   st.rerun()
         with st.container(key="services-footer"):
             display_name = os.getenv("AETHER_USER_NAME", "You").strip() or "You"
-            initial = next((character.upper() for character in display_name if character.isalnum()), "Y")
-            st.markdown(f'<span class="account-initial" data-initial="{safe(initial)}"></span>',
-                        unsafe_allow_html=True)
             st.markdown(f'<style>.st-key-services-footer [data-testid="stPopoverButton"]::before'
-                        f'{{content:"{safe(initial)}"}}</style>', unsafe_allow_html=True)
+                        f'{{background-image:url("{orb_image()}")}}</style>', unsafe_allow_html=True)
             with st.popover(display_name):
-                st.markdown('<div class="account-section-label">Appearance</div>', unsafe_allow_html=True)
-                st.radio("Appearance", ("Light", "Dark"), horizontal=True, label_visibility="collapsed",
-                         key="appearance", index=1 if st.session_state.dark_mode else 0,
-                         on_change=set_appearance)
                 st.markdown('<div class="account-section-label">Connected tools</div>'
                             '<div class="connected-services"><span>Gmail</span><span>Calendar</span>'
                             '<span>Weather</span></div><div class="account-info">'
@@ -579,8 +564,7 @@ def message_list(messages):
             continue
         visible = True
         role = "user" if isinstance(message, HumanMessage) else "assistant"
-        logo = ROOT / "assets" / ("logo_dark.svg" if st.session_state.get("dark_mode") else "logo.svg")
-        with st.chat_message(role, avatar=str(logo) if role == "assistant" else None):
+        with st.chat_message(role, avatar=orb_image() if role == "assistant" else None):
             rendered_result = False
             if role == "assistant":
                 if used_services:
@@ -606,9 +590,11 @@ def message_list(messages):
 
 def copy_control(content):
     value = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    muted, text = theme_color("text-muted"), theme_color("text")
     st.iframe(f"""
       <style>body {{ margin:0; }}
-      button {{ border:0; padding:2px; background:transparent; color:#8A8A90; cursor:pointer; }}
+      button {{ border:0; padding:2px; background:transparent; color:{muted}; cursor:pointer; }}
+      button:hover {{ color:{text}; }}
       svg {{ width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }}</style>
       <button id="copy" aria-label="Copy response" title="Copy response"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg></button>
       <script>
@@ -623,12 +609,9 @@ def copy_control(content):
 
 
 def empty_state():
-    hour = datetime.now(LOCAL_TIME).hour
-    greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 17 else "Good evening"
-    st.markdown(f'<div class="empty-state"><img src="{logo_image()}" alt=""/>'
-                f'<div class="empty-title">{greeting}</div>'
-                '<div class="empty-subtitle">Ask about your inbox, calendar, or the weather.</div></div>',
-                unsafe_allow_html=True)
+    st.markdown('<div class="empty-state"><div class="empty-title">How can I help today?</div>'
+                '<div class="empty-subtitle">Ask about your inbox, calendar, or the weather.</div>'
+                f'{orb_markup("hero")}</div>', unsafe_allow_html=True)
     cards = (("Unread emails", "See what needs your attention", "mail", "gmail"),
              ("This week’s calendar", "Find your upcoming plans", "calendar_month", "calendar"),
              ("Weather in Rawalpindi", "Check today’s conditions", "partly_cloudy_day", "weather"),
@@ -645,7 +628,7 @@ def empty_state():
                         st.markdown(f'<div class="suggestion-title">{safe(title)}</div>', unsafe_allow_html=True)
                         st.markdown(f'<div class="suggestion-description">{safe(description)}</div>', unsafe_allow_html=True)
                         if st.button(title, key=f"suggest-{SUGGESTIONS[index]}", type="secondary",
-                                     use_container_width=True):
+                                     width="stretch"):
                             return SUGGESTIONS[index]
     return None
 
@@ -685,16 +668,29 @@ def pending_in_history(messages, pending):
                for message in messages)
 
 
+THINKING_LABELS = ("Thinking...", "Pondering...", "Working through it...", "Gathering details...",
+                   "Connecting the dots...", "Putting it together...", "Almost there...")
+TURN_TIMEOUT_SECONDS = 30
+
+
+def working_label(label, elapsed):
+    if label not in {"Thinking...", "Writing the reply..."}:
+        return label
+    return THINKING_LABELS[min(int(elapsed // 3), len(THINKING_LABELS) - 1)]
+
+
 def render_working_status(slot, label, started_at):
     elapsed = int(time.monotonic() - started_at)
-    timer = f'<span class="working-elapsed">{elapsed}s</span>' if elapsed >= 4 else ""
-    notice = ('<div class="working-long">Still working. This is taking longer than usual.</div>'
-              if elapsed >= 20 else "")
-    text = safe(label.removesuffix("..."))
-    dots = '<span class="working-dots" aria-hidden="true"><i></i><i></i><i></i></span>' if label.endswith("...") else ""
-    slot.markdown(f'<div class="working-progress"><div class="working-line"><span class="working-spinner" '
-                  f'aria-hidden="true"></span><span>{text}</span>{dots}{timer}</div>{notice}</div>',
-                  unsafe_allow_html=True)
+    label = working_label(label, elapsed)
+    timer = f'<div class="working-elapsed">{elapsed}s</div>' if elapsed >= 6 else ""
+    previous, transition = st.session_state.get("working_label_transition", (None, 0))
+    if previous != label:
+        transition = 1 - transition
+        st.session_state.working_label_transition = (label, transition)
+    # A stable orb node keeps its animation running while only the label changes.
+    slot.markdown(f'<div class="working-progress">{orb_markup("thinking")}'
+                  f'<div class="working-line"><span class="working-label phase-{transition}" data-phase="{safe(label)}">'
+                  f'{safe(label)}</span></div>{timer}</div>', unsafe_allow_html=True)
 
 
 def run_pending_turn(thread_id, status_slot):
@@ -706,10 +702,10 @@ def run_pending_turn(thread_id, status_slot):
             result = asyncio.run(asyncio.wait_for(
                 invoke_agent(thread_id, message=None if pending.get("resume") else pending["prompt"],
                              progress=events.put,
-                             turn_id=pending["turn_id"]), timeout=90))
+                             turn_id=pending["turn_id"]), timeout=TURN_TIMEOUT_SECONDS))
             events.put(("complete", result))
         except TimeoutError:
-            events.put(("error", RuntimeError("The request timed out after 90 seconds.")))
+            events.put(("error", RuntimeError("The request timed out after 30 seconds.")))
         except Exception as error:
             events.put(("error", error))
 
@@ -747,11 +743,13 @@ def render_pending_turn(messages):
     if not stored:
         with st.chat_message("user"):
             render_content(pending["prompt"], remove_emoji=False)
-    logo = ROOT / "assets" / ("logo_dark.svg" if st.session_state.get("dark_mode") else "logo.svg")
-    with st.chat_message("assistant", avatar=str(logo)):
+    with st.chat_message("assistant", avatar=orb_image()):
         if st.session_state.get("run_error"):
-            st.markdown('<div class="run-failure">Something went wrong. Your message was not lost.</div>',
-                        unsafe_allow_html=True)
+            timed_out = st.session_state.run_error == "The request timed out after 30 seconds."
+            message = ("This is taking too long. Please try again." if timed_out
+                       else "Something went wrong. Your message was not lost.")
+            st.markdown(f'<div class="pending-failure">{orb_markup("thinking")}'
+                        f'<div class="run-failure">{message}</div></div>', unsafe_allow_html=True)
             if st.button("Retry", key=f'retry-{pending["turn_id"]}', type="secondary"):
                 pending["resume"] = stored
                 st.session_state.run_error = None
@@ -773,8 +771,7 @@ def confirmation_card(actions):
     progress_started = time.monotonic()
     for action in actions:
         action_id, kind, args = action["id"], action["name"], action["args"]
-        logo = ROOT / "assets" / ("logo_dark.svg" if st.session_state.get("dark_mode") else "logo.svg")
-        with st.chat_message("assistant", avatar=str(logo)):
+        with st.chat_message("assistant", avatar=orb_image()):
             if ready:
                 progress_slot = st.empty()
                 render_working_status(progress_slot, "Thinking...", progress_started)
@@ -865,7 +862,7 @@ def checkpoint_pending_turn(snapshot, actions):
 
 def main():
     setup_page()
-    st.markdown(f'<div class="collapsed-brand"><img src="{logo_image()}" alt=""/>'
+    st.markdown(f'<div class="collapsed-brand">{orb_markup()}'
                 '<span class="wordmark">Aether</span></div>', unsafe_allow_html=True)
     manager = ConversationManager(ROOT / "conversations.json")
     conversations = manager.list()
@@ -896,7 +893,7 @@ def main():
     if st.session_state.get("delete_target"):
         delete_conversation_dialog(manager)
     if not st.session_state.active_conversation:
-        st.markdown('<div class="empty-title">Aether</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="empty-state"><div class="empty-title">Aether</div>{orb_markup("hero")}</div>', unsafe_allow_html=True)
         st.write("Create a conversation to begin.")
         return
     name = st.session_state.active_conversation
