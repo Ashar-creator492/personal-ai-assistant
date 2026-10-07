@@ -54,7 +54,7 @@ def orb_image(size=96):
 
 
 def orb_markup(kind="mark"):
-    source = orb_image(512 if kind in {"hero", "thinking"} else 96)
+    source = orb_image(512 if kind == "hero" else 96)
     return (f'<span class="orb orb-{kind}" aria-hidden="true">'
             f'<img class="orb-image" src="{source}" alt=""/>'
             '<span class="orb-highlight"></span></span>')
@@ -272,15 +272,24 @@ def delete_conversation_dialog(manager):
         st.rerun()
 
 
+def start_draft():
+    st.session_state.active_conversation = None
+    st.session_state.thread_id = None
+    st.session_state.pending_turn = None
+    st.session_state.run_active = False
+    st.session_state.run_error = None
+    st.session_state.composer = ""
+    st.query_params.pop("conversation", None)
+
+
 def sidebar(manager, conversations, snapshots):
     with st.sidebar:
         st.markdown(f'<div class="sidebar-brand">{orb_markup()}'
                     '<span class="wordmark">Aether</span></div>', unsafe_allow_html=True)
         if st.button("New conversation", icon=":material/add:", width="stretch", type="secondary"):
-            name = unique_name(conversations)
-            manager.create(name)
-            st.session_state.active_conversation = name
-            st.rerun()
+            if st.session_state.active_conversation is not None:
+                start_draft()
+                st.rerun()
         query = st.text_input("Search conversations", placeholder="Search conversations",
                               label_visibility="collapsed", key="conversation_search").casefold().strip()
         with st.container(key="conversation-list"):
@@ -300,6 +309,8 @@ def sidebar(manager, conversations, snapshots):
                       with row:
                           if st.button(name, key=f"select-{thread_id}", icon=":material/chat_bubble_outline:",
                                        width="stretch"):
+                              if st.session_state.active_conversation is None:
+                                  st.session_state.composer = ""
                               st.session_state.active_conversation = name
                               st.rerun()
                       with time_col:
@@ -682,15 +693,15 @@ def working_label(label, elapsed):
 def render_working_status(slot, label, started_at):
     elapsed = int(time.monotonic() - started_at)
     label = working_label(label, elapsed)
-    timer = f'<div class="working-elapsed">{elapsed}s</div>' if elapsed >= 6 else ""
+    timer = f'<div class="working-elapsed">{elapsed}s</div>' if elapsed >= 5 else ""
     previous, transition = st.session_state.get("working_label_transition", (None, 0))
     if previous != label:
         transition = 1 - transition
         st.session_state.working_label_transition = (label, transition)
     # A stable orb node keeps its animation running while only the label changes.
     slot.markdown(f'<div class="working-progress">{orb_markup("thinking")}'
-                  f'<div class="working-line"><span class="working-label phase-{transition}" data-phase="{safe(label)}">'
-                  f'{safe(label)}</span></div>{timer}</div>', unsafe_allow_html=True)
+                  f'<div class="working-copy"><div class="working-line"><span class="working-label phase-{transition}" data-phase="{safe(label)}">'
+                  f'{safe(label)}</span>{timer}</div></div></div>', unsafe_allow_html=True)
 
 
 def run_pending_turn(thread_id, status_slot):
@@ -830,6 +841,12 @@ def title_from_prompt(prompt, conversations):
 
 
 def queue_message(prompt, first_turn=False):
+    if st.session_state.active_conversation is None:
+        manager = ConversationManager(ROOT / "conversations.json")
+        name = unique_name(manager.list())
+        st.session_state.thread_id = manager.create(name)
+        st.session_state.active_conversation = name
+        st.query_params["conversation"] = st.session_state.thread_id
     if should_auto_title(st.session_state.active_conversation, prompt):
         manager = ConversationManager(ROOT / "conversations.json")
         old_name = st.session_state.active_conversation
@@ -862,16 +879,12 @@ def checkpoint_pending_turn(snapshot, actions):
 
 def main():
     setup_page()
-    st.markdown(f'<div class="collapsed-brand">{orb_markup()}'
-                '<span class="wordmark">Aether</span></div>', unsafe_allow_html=True)
     manager = ConversationManager(ROOT / "conversations.json")
     conversations = manager.list()
-    if st.session_state.get("active_conversation") not in conversations:
-        active_thread = st.session_state.get("thread_id")
+    if "active_conversation" not in st.session_state:
+        selected_thread = st.query_params.get("conversation")
         st.session_state.active_conversation = next(
-            (name for name, thread_id in conversations.items() if thread_id == active_thread),
-            next(iter(conversations), None),
-        )
+            (name for name, thread_id in conversations.items() if thread_id == selected_thread), None)
     snapshots = {name: asyncio.run(conversation_state(thread_id))
                  for name, thread_id in conversations.items()}
     for name, thread_id in list(conversations.items()):
@@ -886,30 +899,41 @@ def main():
             snapshots[title] = snapshots.pop(name)
             if st.session_state.active_conversation == name:
                 st.session_state.active_conversation = title
+    # Reuse the already-loaded checkpoint history; pending text is an optimistic message.
+    conversations = {name: thread_id for name, thread_id in conversations.items()
+                     if snapshots[name].values.get("messages") or (
+                         thread_id == st.session_state.get("thread_id")
+                         and st.session_state.get("pending_turn"))}
+    active = st.session_state.active_conversation
+    if active is not None and active not in conversations:
+        selected_thread = st.session_state.get("thread_id")
+        st.session_state.active_conversation = next(
+            (name for name, thread_id in conversations.items() if thread_id == selected_thread),
+            next(iter(conversations), None))
+    if st.session_state.active_conversation is not None:
+        st.query_params["conversation"] = conversations[st.session_state.active_conversation]
+    else:
+        st.query_params.pop("conversation", None)
     sidebar(manager, conversations, snapshots)
     if st.session_state.get("conversation_deleted_toast"):
         st.session_state.conversation_deleted_toast = False
         st.toast("Conversation deleted")
     if st.session_state.get("delete_target"):
         delete_conversation_dialog(manager)
-    if not st.session_state.active_conversation:
-        st.markdown(f'<div class="empty-state"><div class="empty-title">Aether</div>{orb_markup("hero")}</div>', unsafe_allow_html=True)
-        st.write("Create a conversation to begin.")
-        return
     name = st.session_state.active_conversation
-    thread_id = conversations[name]
+    thread_id = conversations[name] if name else None
     st.session_state.thread_id = thread_id
-    snapshot = snapshots[name]
-    actions = pending_actions(snapshot)
-    recovered = checkpoint_pending_turn(snapshot, actions)
+    snapshot = snapshots[name] if name else None
+    actions = pending_actions(snapshot) if snapshot else []
+    recovered = checkpoint_pending_turn(snapshot, actions) if snapshot else None
     if recovered and not st.session_state.get("pending_turn"):
         st.session_state.pending_turn = recovered
         st.session_state.run_active = True
         st.session_state.run_error = None
     with st.container(key="chat-content"):
-        header(name)
+        header(name or "New conversation")
         with st.container(key="message-area"):
-            messages = snapshot.values.get("messages", [])
+            messages = snapshot.values.get("messages", []) if snapshot else []
             has_messages = message_list(messages)
             status_slot = render_pending_turn(messages)
             if actions:

@@ -21,6 +21,11 @@ from app import (checkpoint_pending_turn, clean_conversation_title, event_parts,
 
 
 class AppTests(unittest.TestCase):
+    def setUp(self):
+        title_model = patch("src.assistant.agent.create_chat_model", side_effect=RuntimeError("offline test"))
+        title_model.start()
+        self.addCleanup(title_model.stop)
+
     def test_delete_target_requires_explicit_confirmation(self):
         class Manager:
             def __init__(self):
@@ -170,7 +175,7 @@ class AppTests(unittest.TestCase):
                      threads["Earlier chat"]: now - timedelta(days=4)}
 
             async def state(thread_id):
-                return SimpleNamespace(values={}, tasks=[], created_at=dates[thread_id].isoformat())
+                return SimpleNamespace(values={"messages": [HumanMessage(content="hi")]}, tasks=[], created_at=dates[thread_id].isoformat())
 
             with patch("src.assistant.conversations.ConversationManager", return_value=manager), \
                  patch("src.assistant.agent.conversation_state", state):
@@ -215,6 +220,7 @@ class AppTests(unittest.TestCase):
                  patch("src.assistant.agent.conversation_state", state):
                 app = AppTest.from_file(str(Path(__file__).parents[1] / "app.py")).run(timeout=15)
                 self.assertFalse(app.exception)
+                app.button(key=f"select-{manager.get('Results')}").click().run(timeout=15)
                 output = " ".join(item.value for item in app.markdown)
                 self.assertIn("<strong>26°C</strong>", output)
                 self.assertIn("Meeting", output)
@@ -237,12 +243,14 @@ class AppTests(unittest.TestCase):
             manager = ConversationManager(Path(directory) / "conversations.json")
             existing = manager.create("Existing")
             calls = []
+            history = {existing: [HumanMessage(content="hi"), AIMessage(content="Hello")]}
 
             async def state(thread_id):
-                return SimpleNamespace(values={}, tasks=[])
+                return SimpleNamespace(values={"messages": history.get(thread_id, [])}, tasks=[])
 
             async def invoke(thread_id, message=None, approvals=None, progress=None, turn_id=None):
                 calls.append((thread_id, message, approvals))
+                history.setdefault(thread_id, []).extend([HumanMessage(content=message), AIMessage(content="Done")])
                 if progress:
                     progress({"phase": "tool", "tool": "get_recent_emails", "args": {}})
 
@@ -257,10 +265,14 @@ class AppTests(unittest.TestCase):
                 self.assertEqual(app.session_state["active_conversation"], "Existing")
 
                 next(button for button in app.button if button.label == "New conversation").click().run(timeout=15)
-                new_thread = manager.get("New conversation")
-                self.assertEqual(app.session_state["active_conversation"], "New conversation")
+                for _ in range(4):
+                    next(button for button in app.button if button.label == "New conversation").click().run(timeout=15)
+                self.assertIsNone(app.session_state["active_conversation"])
+                self.assertEqual(manager.list(), {"Existing": existing})
                 app.button(key="suggest-Check my unread emails").click().run(timeout=15)
                 app.run(timeout=15)
+                new_thread = manager.get("Check my unread emails")
+                self.assertEqual(len(manager.list()), 2)
                 self.assertEqual(calls, [(new_thread, "Check my unread emails", None)])
                 self.assertEqual(manager.get("Check my unread emails"), new_thread)
                 self.assertEqual(app.session_state["active_conversation"], "Check my unread emails")
@@ -275,6 +287,47 @@ class AppTests(unittest.TestCase):
                 self.assertEqual(len(app.radio), 0)
                 self.assertNotIn("dark_mode", app.session_state)
 
+    def test_draft_first_send_and_reload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = ConversationManager(Path(directory) / "conversations.json")
+            empty = manager.create("New conversation")
+            existing = manager.create("Existing")
+            history = {existing: [HumanMessage(content="hi")]}
+            calls = []
+
+            async def state(thread_id):
+                return SimpleNamespace(values={"messages": history.get(thread_id, [])}, tasks=[])
+
+            async def invoke(thread_id, message=None, approvals=None, progress=None, turn_id=None):
+                calls.append(thread_id)
+                history.setdefault(thread_id, []).extend([HumanMessage(content=message), AIMessage(content="Done")])
+
+            with patch("src.assistant.conversations.ConversationManager", return_value=manager), \
+                 patch("src.assistant.agent.conversation_state", state), \
+                 patch("src.assistant.agent.invoke_agent", invoke):
+                path = str(Path(__file__).parents[1] / "app.py")
+                app = AppTest.from_file(path).run(timeout=15)
+                self.assertIsNone(app.session_state["active_conversation"])
+                self.assertNotIn(f"select-{empty}", [button.key for button in app.button])
+                self.assertEqual(len(manager.list()), 2)
+                app.chat_input[0].set_value("Check the weather in Lahore").run(timeout=15)
+                app.run(timeout=15)
+                self.assertFalse(app.exception)
+                self.assertEqual(len(manager.list()), 3)
+                thread_id = calls[0]
+                self.assertEqual(app.query_params["conversation"], [thread_id])
+                restored = AppTest.from_file(path)
+                restored.query_params["conversation"] = thread_id
+                restored.run(timeout=15)
+                self.assertEqual(restored.session_state["thread_id"], thread_id)
+                restored.chat_input[0].set_value("hi").run(timeout=15)
+                restored.run(timeout=15)
+                self.assertEqual(calls, [thread_id, thread_id])
+                self.assertEqual(len(manager.list()), 3)
+                draft = AppTest.from_file(path).run(timeout=15)
+                self.assertIsNone(draft.session_state["active_conversation"])
+                self.assertNotIn("conversation", draft.query_params)
+
     def test_confirmation_uses_saved_thread(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = ConversationManager(Path(directory) / "conversations.json")
@@ -286,7 +339,7 @@ class AppTests(unittest.TestCase):
 
             async def state(selected_thread):
                 tasks = [SimpleNamespace(interrupts=[SimpleNamespace(value=pending)])] if pending else []
-                return SimpleNamespace(values={}, tasks=tasks)
+                return SimpleNamespace(values={"messages": [HumanMessage(content="hi")]}, tasks=tasks)
 
             async def invoke(selected_thread, message=None, approvals=None, progress=None, turn_id=None):
                 calls.append((selected_thread, approvals))
@@ -297,6 +350,7 @@ class AppTests(unittest.TestCase):
                  patch("src.assistant.agent.invoke_agent", invoke):
                 app = AppTest.from_file(str(Path(__file__).parents[1] / "app.py")).run(timeout=15)
                 self.assertFalse(app.exception)
+                app.button(key=f"select-{thread_id}").click().run(timeout=15)
                 app.button(key="reject-send-1").click().run(timeout=15)
                 self.assertEqual(calls, [(thread_id, {"send-1": False})])
                 self.assertFalse(app.exception)
