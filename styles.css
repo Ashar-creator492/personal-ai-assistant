@@ -115,13 +115,11 @@ html:has(section[data-testid="stSidebar"][aria-expanded="false"]) .chat-header {
 .orb-highlight { position:absolute; inset:10%; pointer-events:none; border-radius:50%; background:radial-gradient(ellipse at 25% 22%,rgba(255,255,255,.35),transparent 35%); }
 .orb-hero { display:block; width:220px; height:220px; margin:28px auto 22px; }
 .orb-hero::before { content:''; position:absolute; z-index:-1; width:65%; height:12%; left:17.5%; bottom:-24px; border-radius:50%; background:rgba(194,69,143,.18); filter:blur(12px); }
-.orb-hero .orb-image { border-radius:50%; overflow:hidden; transform-origin:center; will-change:transform; animation:orb-hero-load 2.4s ease-out both,orb-hero-idle 16s linear 2.4s infinite; }
-.orb-hero .orb-highlight { animation:none; }
+.orb-hero .orb-image, .orb-hero .orb-highlight { animation:orb-idle 4s ease-in-out infinite; }
 .orb-thinking { display:block; width:28px; height:28px; margin:0; }
 .orb-thinking .orb-image { animation:orb-spin 3s linear infinite; }
 .orb-thinking .orb-highlight { animation:none; }
-@keyframes orb-hero-load { from { transform:rotate(0); } to { transform:rotate(720deg); } }
-@keyframes orb-hero-idle { from { transform:rotate(0); } to { transform:rotate(360deg); } }
+@keyframes orb-idle { 0%,100% { transform:translateY(0) scale(1); } 50% { transform:translateY(-6px) scale(1.04); } }
 @keyframes orb-spin { to { transform:rotate(360deg); } }
 .empty-state { text-align:center; margin:24px auto 22px; }
 .empty-title { font:600 32px/1.25 var(--font); color:var(--text); letter-spacing:-.04em; }
