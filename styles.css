@@ -50,7 +50,7 @@ section[data-testid="stMain"] [data-testid="stLayoutWrapper"]:has(> .st-key-mess
 [data-testid="stMarkdownContainer"] h1.conversation-title { flex:1; min-width:0; margin:0 !important; padding:0 !important; font:600 20px/1.4 var(--font); letter-spacing:-.03em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text); }
 .header-services { display:flex; gap:5px; flex:none; }
 .status-chip, .connected-services span { display:inline-flex; align-items:center; color:var(--text); border:1px solid var(--border); border-radius:999px; padding:3px 8px; background:var(--card); font-size:11px; font-weight:500; white-space:nowrap; }
-.st-key-message-area { flex:1 1 auto; min-height:0; width:calc(100% - 48px); max-width:var(--column); margin:0 auto; padding:24px 0; overflow-y:auto; scrollbar-width:thin; scrollbar-color:rgba(27,24,34,.18) transparent; }
+.st-key-message-area { flex:1 1 auto; min-height:0; width:100%; max-width:none; margin:0; padding:24px max(24px,calc((100% - var(--column))/2)); overflow-y:auto; scrollbar-width:thin; scrollbar-color:rgba(27,24,34,.18) transparent; }
 [data-testid="stBottom"], [data-testid="stBottom"] > div { background:transparent; }
 
 section[data-testid="stSidebar"] { width:248px !important; min-width:240px !important; max-width:300px !important; height:calc(100dvh - 24px); margin:12px; border:1px solid var(--border); border-radius:20px; background:var(--white); box-shadow:var(--shadow); transition:width .2s ease,transform .2s ease; overflow:hidden; }
@@ -261,7 +261,7 @@ pre, code { color:var(--text); background:var(--card); }
   .st-key-suggestion-cards [class*="st-key-suggestion-"] { min-height:80px; padding:8px 12px; }
 }
 @media (max-width:700px) {
-  .st-key-message-area { width:calc(100% - 28px); }
+  .st-key-message-area { padding-right:14px; padding-left:14px; }
   .chat-header { gap:8px; flex-wrap:wrap; }
   [data-testid="stMarkdownContainer"] h1.conversation-title { flex-basis:100%; }
   .header-services { flex-basis:100%; justify-content:flex-end; }
